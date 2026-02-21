@@ -1,83 +1,75 @@
-# 🏋️ IronPulse — Personal Gym Management Platform
+# 🏋️ IronPulse — Elite Fitness Management Platform
 
-A full-featured gym management web application built with **Django** (Python) and **MySQL**, featuring:
+IronPulse is a high-performance, dark-luxury gym management web application built with **Django** and **MySQL**. It's designed for serious athletes who want precise tracking of their training volume, scientific strength metrics, and body composition.
 
-## ✨ Features
+## ✨ Premium Features
 
-- **🏠 Dashboard** — Activity charts, stats, recent workouts, top PRs, goals overview, nutrition summary
-- **⚡ 1RM Calculator** — 7 scientific formulas (Epley, Brzycki, Lander, Lombardi, Mayhew, O'Connor, Wathan), load percentage table, and Chart.js bar chart
-- **🏋️ Workout Logger** — Session-based workout tracking with live 1RM preview per set as you enter weight/reps
-- **📋 Exercise Library** — 60 pre-seeded exercises with muscle-group filter tabs
-- **🏆 Personal Records** — Auto-tracked from workout sessions
-- **📏 Body Measurements** — Weight trend chart with BMI calculation
-- **🥗 Nutrition Log** — Daily macro and calorie tracking with summary
-- **🎯 Goals** — Progress tracking with progress bars and deadlines
+- **🏠 Command Center (Dashboard)** — Real-time activity heatmaps, rapid stat summaries, and interactive goal tracking.
+- **⚡ Scientific 1RM Intelligence** — Calculate your peak strength using 7 industry-standard scientific formulas (Epley, Brzycki, Lander, etc.) with automated percentage load tables.
+- **🏋️ Elite Workout Engine** — Advanced session tracking with live 1RM estimation as you log your sets.
+- **🔍 Smart Exercise Library** — Pre-seeded with 60+ foundational movements, featuring instant search and muscle-group filtering.
+- **🏆 PR Auto-Tracker** — Your personal records are automatically identified and archived from your training logs.
+- **📏 Biometric Tracking** — High-fidelity weight trend charts with automated BMI calculation and body fat tracking.
+- **🥗 Macro & Nutrition Intel** — Daily snapshot of your caloric and protein intake to fuel performance.
+- **🎯 Dynamic Goals** — Visual progress tracking for strength, weight loss, or custom milestones.
+- **📥 Data Portability** — Export your entire training history to CSV for external analysis.
 
-## 🚀 Quick Start (Local)
+## 🚀 Velocity Stack
+
+- **Backend**: Django 4.2 (Python 3.9)
+- **Database**: MySQL (Production) / SQLite (Development)
+- **Frontend**: Custom CSS Design System (Inter & Outfit Typography), Chart.js
+- **Testing**: Pytest-Django (Core coverage: Models, Views, API)
+- **Architecture**: Optimized with DB indexes and pre-fetched queries for maximum scalability.
+
+## 🛠️ Installation & Setup
 
 ```bash
-# 1. Clone the repo
+# 1. Clone & Initialize
 git clone https://github.com/alessandrofolloni/GYM.git
 cd GYM
 
-# 2. Create and activate virtual environment
+# 2. Virtual Environment
 python3 -m venv venv
 source venv/bin/activate
 
-# 3. Install dependencies
+# 3. Dependencies
 pip install -r requirements.txt
+pip install pytest pytest-django  # For testing
 
-# 4. Configure environment
+# 4. Global Configuration
 cp .env.example .env
-# Edit .env with your settings
+# Configure your DB_ENGINE (mysql/sqlite) and credentials in .env
 
-# 5. Migrate database (SQLite by default, MySQL in production)
+# 5. Database Deployment
+python manage.py makemigrations
 python manage.py migrate
+python seed.py          # Rapidly seed 60+ exercises
 
-# 6. Seed exercises
-python seed.py
-
-# 7. Create superuser (for admin panel)
-python manage.py createsuperuser
-
-# 8. Run server
+# 6. Ignite the Server
 python manage.py runserver
 ```
 
-Visit http://127.0.0.1:8000/
+## 🧪 Quality Assurance
 
-## 🔧 Environment Variables
+We use `pytest` to ensure structural integrity across models and views.
+```bash
+PYTHONPATH=. pytest core/tests/ -c core/pytest.ini
+```
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DEBUG` | `True` | Debug mode |
-| `DB_ENGINE` | `sqlite` | Use `mysql` for MySQL |
-| `DB_NAME` | `gymapp` | Database name |
-| `DB_USER` | `root` | Database user |
-| `DB_PASSWORD` | `` | Database password |
-| `DB_HOST` | `localhost` | Database host |
-| `DB_PORT` | `3306` | MySQL port |
-
-## 🛠️ Tech Stack
-
-- **Backend**: Django 4.2, Python 3.9
-- **Database**: MySQL (production) / SQLite (development)
-- **Frontend**: Vanilla HTML/CSS/JS, Chart.js
-- **Design**: Dark luxury gym aesthetic, custom CSS design system
-
-## 📁 Project Structure
+## 📁 Architecture Overview
 
 ```
 GYM/
-├── gymapp/         # Django project config
-├── core/           # Main app (models, views, urls)
-│   ├── models.py   # Exercise, Workout, Measurement, Nutrition, Goals
-│   ├── views.py    # All views + 1RM API
-│   └── forms.py
-├── templates/      # HTML templates
-│   ├── base.html   # Sidebar + topbar layout
-│   └── core/       # Feature templates
-├── static/css/     # main.css (full design system)
-├── seed.py         # Exercise seeder (60 exercises)
-└── requirements.txt
+├── gymapp/         # Core System Configuration
+├── core/           # Engine (Models, Logic, API)
+│   ├── tests/      # Automated Test Suite
+│   ├── models.py   # Normalized Data Structures
+│   └── views.py    # High-Performance Logic
+├── templates/      # Dark Luxury UI (Semantic HTML)
+├── static/css/     # IronPulse Design System (main.css)
+└── seed.py         # Automated Data Seeder
 ```
+
+---
+*Built for performance. Managed with precision. **IronPulse.***

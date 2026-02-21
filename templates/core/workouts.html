@@ -3,6 +3,7 @@
 {% block page_title %}🏋️ Workout Log{% endblock %}
 
 {% block topbar_actions %}
+<a href="{% url 'core:export_workouts_csv' %}" class="btn btn-secondary btn-sm">📥 Export CSV</a>
 <a href="{% url 'core:new_workout' %}" class="btn btn-primary btn-sm">+ Log Workout</a>
 {% endblock %}
 

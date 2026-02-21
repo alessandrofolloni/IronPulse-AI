@@ -1,10 +1,11 @@
 from django.shortcuts import render, get_object_or_404, redirect
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 from django.db.models import Max, Avg, Count, Sum
 from django.utils import timezone
 from datetime import timedelta
 import json
 import math
+import csv
 
 from .models import (
     Exercise, WorkoutSession, WorkoutSet,
@@ -146,6 +147,27 @@ def workouts(request):
     return render(request, 'core/workouts.html', context)
 
 
+def export_workouts_csv(request):
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="workouts_export.csv"'
+    
+    writer = csv.writer(response)
+    writer.writerow(['Date', 'Workout Name', 'Exercise', 'Weight', 'Reps', 'Unit', '1RM'])
+    
+    sets = WorkoutSet.objects.select_related('session', 'exercise').order_by('-session__date')
+    for s in sets:
+        writer.writerow([
+            s.session.date,
+            s.session.name or "Workout",
+            s.exercise.name,
+            s.weight,
+            s.reps,
+            s.unit,
+            s.one_rm
+        ])
+    return response
+
+
 def new_workout(request):
     exercises = Exercise.objects.all()
     if request.method == 'POST':
@@ -218,12 +240,16 @@ def delete_workout(request, pk):
 
 def exercises(request):
     muscle_filter = request.GET.get('muscle', '')
+    search_query = request.GET.get('q', '')
     qs = Exercise.objects.all()
     if muscle_filter:
         qs = qs.filter(muscle_group=muscle_filter)
+    if search_query:
+        qs = qs.filter(name__icontains=search_query)
     context = {
         'exercises': qs,
         'muscle_filter': muscle_filter,
+        'search_query': search_query,
         'muscle_choices': Exercise._meta.get_field('muscle_group').choices,
         'active_tab': 'exercises',
     }

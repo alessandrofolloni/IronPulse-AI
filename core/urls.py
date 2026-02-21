@@ -7,6 +7,7 @@ urlpatterns = [
     path('', views.dashboard, name='dashboard'),
     path('one-rm/', views.one_rm_calculator, name='one_rm'),
     path('workouts/', views.workouts, name='workouts'),
+    path('workouts/export-csv/', views.export_workouts_csv, name='export_workouts_csv'),
     path('workouts/new/', views.new_workout, name='new_workout'),
     path('workouts/<int:pk>/', views.workout_detail, name='workout_detail'),
     path('workouts/<int:pk>/delete/', views.delete_workout, name='delete_workout'),
