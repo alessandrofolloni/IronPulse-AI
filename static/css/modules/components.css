@@ -1,0 +1,263 @@
+/* ── Cards ────────────────────────────────────────────────────── */
+.card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    transition: all var(--transition);
+}
+
+.card:hover {
+    border-color: rgba(255, 255, 255, .12);
+    box-shadow: var(--shadow);
+}
+
+.card-glass {
+    background: rgba(22, 26, 34, .7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin-bottom: 32px;
+}
+
+.stat-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    position: relative;
+    overflow: hidden;
+    transition: all var(--transition);
+}
+
+.stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+}
+
+.stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, .4);
+    border-color: rgba(255, 255, 255, .1);
+}
+
+/* ── Buttons ──────────────────────────────────────────────────── */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+    text-decoration: none;
+    transition: all var(--transition);
+    font-family: 'Inter', sans-serif;
+    white-space: nowrap;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, var(--accent), #c2410c);
+    color: white;
+    box-shadow: 0 0 20px var(--accent-glow);
+}
+
+.btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 0 30px rgba(249, 115, 22, .4);
+    color: white;
+}
+
+.btn-secondary {
+    background: rgba(255, 255, 255, .07);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+}
+
+.btn-secondary:hover {
+    background: rgba(255, 255, 255, .12);
+    color: var(--text-primary);
+}
+
+.btn-danger {
+    background: rgba(239, 68, 68, .15);
+    color: var(--danger);
+    border: 1px solid rgba(239, 68, 68, .3);
+}
+
+.btn-sm {
+    padding: 6px 14px;
+    font-size: 12px;
+}
+
+.btn-lg {
+    padding: 14px 28px;
+    font-size: 16px;
+}
+
+/* ── Tables ───────────────────────────────────────────────────── */
+.table-wrap {
+    overflow-x: auto;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+thead tr {
+    background: rgba(255, 255, 255, .04);
+    border-bottom: 1px solid var(--border);
+}
+
+th {
+    padding: 14px 18px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--text-muted);
+}
+
+td {
+    padding: 14px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, .04);
+    color: var(--text-secondary);
+}
+
+tbody tr:hover {
+    background: rgba(255, 255, 255, .03);
+}
+
+/* ── Tags & Badges ────────────────────────────────────────────── */
+.tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+}
+
+.tag-chest {
+    background: rgba(239, 68, 68, .15);
+    color: #f87171;
+}
+
+.tag-back {
+    background: rgba(59, 130, 246, .15);
+    color: #60a5fa;
+}
+
+.tag-shoulders {
+    background: rgba(168, 85, 247, .15);
+    color: #c084fc;
+}
+
+.tag-biceps {
+    background: rgba(236, 72, 153, .15);
+    color: #f472b6;
+}
+
+.tag-triceps {
+    background: rgba(249, 115, 22, .15);
+    color: #fb923c;
+}
+
+.tag-legs {
+    background: rgba(34, 197, 94, .15);
+    color: #4ade80;
+}
+
+.tag-glutes {
+    background: rgba(234, 179, 8, .15);
+    color: #facc15;
+}
+
+.tag-core {
+    background: rgba(6, 182, 212, .15);
+    color: #22d3ee;
+}
+
+.tag-full_body {
+    background: rgba(255, 255, 255, .1);
+    color: #e2e8f0;
+}
+
+.tag-cardio {
+    background: rgba(99, 102, 241, .15);
+    color: #818cf8;
+}
+
+.tag-active {
+    background: rgba(34, 197, 94, .15);
+    color: #4ade80;
+}
+
+.tag-completed {
+    background: rgba(99, 102, 241, .15);
+    color: #818cf8;
+}
+
+.tag-paused {
+    background: rgba(234, 179, 8, .15);
+    color: #facc15;
+}
+
+/* ── Progress & BMI ───────────────────────────────────────────── */
+.progress-bar-wrap {
+    background: rgba(255, 255, 255, .07);
+    border-radius: 20px;
+    height: 8px;
+    overflow: hidden;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    border-radius: 20px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-light));
+    transition: width .6s ease;
+}
+
+.bmi-badge {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 14px;
+    display: inline-block;
+    font-weight: 800;
+}
+
+.bmi-under {
+    color: #60a5fa;
+}
+
+.bmi-normal {
+    color: #4ade80;
+}
+
+.bmi-over {
+    color: #facc15;
+}
+
+.bmi-obese {
+    color: #f87171;
+}

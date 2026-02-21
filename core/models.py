@@ -162,14 +162,35 @@ class BodyMeasurement(models.Model):
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    @property
     def bmi(self):
-        if self.weight_kg and self.height_cm:
+        if self.height_cm and self.weight_kg:
             h_m = self.height_cm / 100
             return round(self.weight_kg / (h_m ** 2), 1)
         return None
 
+    @property
+    def bmi_category(self):
+        val = self.bmi # Use property
+        if not val: return "none"
+        if val < 18.5: return "under"
+        if val < 25: return "normal"
+        if val < 30: return "over"
+        return "obese"
+
+    @property
+    def bmi_color(self):
+        colors = {
+            "under": "#60a5fa",
+            "normal": "#4ade80",
+            "over": "#facc15",
+            "obese": "#f87171",
+            "none": "inherit"
+        }
+        return colors.get(self.bmi_category, "inherit")
+
     def __str__(self):
-        return f"Measurements - {self.date}"
+        return f"Measurement on {self.date}"
 
     class Meta:
         ordering = ['-date']

@@ -1,0 +1,99 @@
+/* ── AI Laboratory ───────────────────────────────────────────── */
+.insight-card {
+    border-left: 3px solid var(--accent);
+    padding: 16px 20px;
+    background: rgba(249, 115, 22, .05);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    margin-bottom: 12px;
+    transition: all var(--transition);
+}
+
+.insight-card:hover {
+    background: rgba(249, 115, 22, .08);
+    transform: translateX(4px);
+}
+
+.insight-card.indigo {
+    border-left-color: var(--accent2);
+    background: rgba(99, 102, 241, .05);
+}
+
+.insight-card.indigo:hover {
+    background: rgba(99, 102, 241, .08);
+}
+
+.insight-card.green {
+    border-left-color: var(--success);
+    background: rgba(34, 197, 94, .05);
+}
+
+.insight-title {
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.insight-text {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+.glow-pulse {
+    animation: accent-pulse 2s infinite;
+}
+
+@keyframes accent-pulse {
+    0% {
+        text-shadow: 0 0 5px var(--accent-glow);
+    }
+
+    50% {
+        text-shadow: 0 0 20px var(--accent);
+    }
+
+    100% {
+        text-shadow: 0 0 5px var(--accent-glow);
+    }
+}
+
+.tag-indigo {
+    background: rgba(99, 102, 241, .15);
+    color: #818cf8;
+}
+
+/* ── 1RM Calculator Special Styles ───────────────────────────── */
+.calc-hero {
+    background: linear-gradient(135deg, rgba(249, 115, 22, .1), rgba(99, 102, 241, .08));
+    border: 1px solid rgba(249, 115, 22, .2);
+    border-radius: var(--radius);
+    padding: 40px;
+    margin-bottom: 32px;
+    position: relative;
+    overflow: hidden;
+}
+
+.result-number {
+    font-family: 'Outfit', sans-serif;
+    font-size: 80px;
+    font-weight: 900;
+    line-height: 1;
+    background: linear-gradient(135deg, var(--accent), var(--accent-light), #fbbf24);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.formula-card {
+    background: rgba(255, 255, 255, .04);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 14px;
+    text-align: center;
+    transition: all var(--transition);
+}
+
+.formula-card:hover {
+    background: rgba(249, 115, 22, .08);
+    border-color: var(--border-active);
+}
