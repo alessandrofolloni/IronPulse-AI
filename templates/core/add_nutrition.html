@@ -1,0 +1,51 @@
+{% extends 'base.html' %}
+{% block title %}Log Meal{% endblock %}
+{% block page_title %}🥗 Log Meal{% endblock %}
+
+{% block content %}
+<div style="max-width:560px">
+    <div class="section-title">Log a Meal</div>
+    <p class="section-subtitle">Track your nutrition intake</p>
+    <div class="card">
+        <form method="post">
+            {% csrf_token %}
+            {% for field in form %}
+            <div class="form-group">
+                <label class="form-label">{{ field.label }}</label>
+                {{ field }}
+                {% if field.errors %}<div style="color:var(--danger);font-size:13px;margin-top:4px">{{ field.errors.0 }}
+                </div>{% endif %}
+            </div>
+            {% endfor %}
+            <div style="display:flex;gap:12px;margin-top:24px">
+                <button type="submit" class="btn btn-primary">Save Meal</button>
+                <a href="{% url 'core:nutrition' %}" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+<style>
+    input,
+    select,
+    textarea {
+        width: 100%;
+        padding: 12px 16px;
+        background: rgba(255, 255, 255, .05);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text-primary);
+        font-size: 14px;
+        font-family: 'Inter', sans-serif;
+        transition: border .2s;
+        outline: none;
+        box-sizing: border-box;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+</style>
+{% endblock %}

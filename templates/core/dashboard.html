@@ -1,0 +1,250 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard{% endblock %}
+{% block page_title %}🏠 Dashboard{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'core:new_workout' %}" class="btn btn-primary btn-sm">+ Log Workout</a>
+<span style="color:var(--text-muted);font-size:13px" id="currentDate"></span>
+{% endblock %}
+
+{% block content %}
+<!-- Stat Cards -->
+<div class="stats-grid">
+    <div class="stat-card accent">
+        <span class="stat-icon">🏋️</span>
+        <div class="stat-value">{{ total_workouts }}</div>
+        <div class="stat-label">Total Workouts</div>
+    </div>
+    <div class="stat-card indigo">
+        <span class="stat-icon">🔥</span>
+        <div class="stat-value">{{ workouts_this_week }}</div>
+        <div class="stat-label">Workouts This Week</div>
+    </div>
+    <div class="stat-card green">
+        <span class="stat-icon">🏆</span>
+        <div class="stat-value">{{ top_prs|length }}</div>
+        <div class="stat-label">Personal Records</div>
+    </div>
+    <div class="stat-card yellow">
+        <span class="stat-icon">🎯</span>
+        <div class="stat-value">{{ active_goals|length }}</div>
+        <div class="stat-label">Active Goals</div>
+    </div>
+</div>
+
+<!-- Main grid -->
+<div class="grid-2" style="gap:24px;align-items:start">
+    <!-- Left column -->
+    <div>
+        <!-- Activity chart -->
+        <div class="card" style="margin-bottom:24px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+                <h2 style="font-size:16px;font-weight:700;color:var(--text-primary)">📅 30-Day Workout Activity</h2>
+            </div>
+            <div class="chart-container">
+                <canvas id="activityChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Recent Sessions -->
+        <div class="card">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+                <h2 style="font-size:16px;font-weight:700;color:var(--text-primary)">🕐 Recent Sessions</h2>
+                <a href="{% url 'core:workouts' %}" class="btn btn-secondary btn-sm">View All</a>
+            </div>
+            {% if recent_sessions %}
+            {% for session in recent_sessions %}
+            <a href="{% url 'core:workout_detail' session.pk %}" style="text-decoration:none">
+                <div style="display:flex;align-items:center;gap:16px;padding:14px;border-radius:8px;border:1px solid var(--border);margin-bottom:8px;transition:all .2s;background:rgba(255,255,255,.02)"
+                    onmouseover="this.style.background='rgba(255,255,255,.05)'"
+                    onmouseout="this.style.background='rgba(255,255,255,.02)'">
+                    <div
+                        style="width:44px;height:44px;background:linear-gradient(135deg,rgba(249,115,22,.2),rgba(249,115,22,.05));border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px">
+                        🏋️
+                    </div>
+                    <div style="flex:1">
+                        <div style="font-weight:600;color:var(--text-primary);font-size:14px">{{
+                            session.name|default:"Workout Session" }}</div>
+                        <div style="font-size:12px;color:var(--text-muted)">{{ session.date }} · {{ session.sets.count
+                            }} set{{ session.sets.count|pluralize }}</div>
+                    </div>
+                    <div style="font-size:12px;color:var(--accent-light);font-weight:600">
+                        {% if session.duration_minutes %}{{ session.duration_minutes }}min{% endif %}
+                    </div>
+                </div>
+            </a>
+            {% endfor %}
+            {% else %}
+            <div class="empty-state" style="padding:40px 0">
+                <div class="empty-icon">🏋️</div>
+                <h3>No workouts yet</h3>
+                <p>Start logging your training sessions</p>
+                <a href="{% url 'core:new_workout' %}" class="btn btn-primary">Log First Workout</a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Right column -->
+    <div>
+        <!-- Today's Nutrition Summary -->
+        <div class="card" style="margin-bottom:24px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+                <h2 style="font-size:16px;font-weight:700;color:var(--text-primary)">🥗 Today's Nutrition</h2>
+                <a href="{% url 'core:nutrition' %}" class="btn btn-secondary btn-sm">Log Food</a>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                <div
+                    style="text-align:center;padding:16px;background:rgba(249,115,22,.07);border-radius:10px;border:1px solid rgba(249,115,22,.15)">
+                    <div style="font-size:28px;font-weight:800;color:var(--accent-light)">{{ today_cal }}</div>
+                    <div style="font-size:12px;color:var(--text-muted)">Calories</div>
+                </div>
+                <div
+                    style="text-align:center;padding:16px;background:rgba(99,102,241,.07);border-radius:10px;border:1px solid rgba(99,102,241,.15)">
+                    <div style="font-size:28px;font-weight:800;color:#818cf8">{{ today_protein|floatformat:0 }}g</div>
+                    <div style="font-size:12px;color:var(--text-muted)">Protein</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Personal Records -->
+        <div class="card" style="margin-bottom:24px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+                <h2 style="font-size:16px;font-weight:700;color:var(--text-primary)">🏆 Top Personal Records</h2>
+                <a href="{% url 'core:records' %}" class="btn btn-secondary btn-sm">All PRs</a>
+            </div>
+            {% if top_prs %}
+            {% for pr in top_prs %}
+            <div
+                style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.05)">
+                <div>
+                    <div style="font-weight:600;color:var(--text-primary);font-size:14px">{{ pr.exercise.name }}</div>
+                    <div style="font-size:12px;color:var(--text-muted)">{{ pr.weight }}{{ pr.unit }} × {{ pr.reps }}
+                        reps</div>
+                </div>
+                <div style="font-family:'Outfit',sans-serif;font-size:20px;font-weight:700;color:var(--accent-light)">
+                    {{ pr.one_rm }}{{ pr.unit }}
+                </div>
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="empty-state" style="padding:30px 0">
+                <div class="empty-icon">🏆</div>
+                <p>Log workouts to auto-track PRs</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Goals -->
+        <div class="card">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+                <h2 style="font-size:16px;font-weight:700;color:var(--text-primary)">🎯 Active Goals</h2>
+                <a href="{% url 'core:add_goal' %}" class="btn btn-secondary btn-sm">+ Add Goal</a>
+            </div>
+            {% if active_goals %}
+            {% for goal in active_goals %}
+            <div style="margin-bottom:16px">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                    <span style="font-size:14px;font-weight:600;color:var(--text-primary)">{{ goal.title }}</span>
+                    <span style="font-size:13px;color:var(--accent-light);font-weight:700">{{ goal.progress_percent
+                        }}%</span>
+                </div>
+                <div class="progress-bar-wrap">
+                    <div class="progress-bar-fill" style="width:{{ goal.progress_percent }}%"></div>
+                </div>
+                {% if goal.deadline %}
+                <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Deadline: {{ goal.deadline }}</div>
+                {% endif %}
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="empty-state" style="padding:30px 0">
+                <div class="empty-icon">🎯</div>
+                <p>Set training goals to stay motivated</p>
+                <a href="{% url 'core:add_goal' %}" class="btn btn-primary btn-sm">Add a Goal</a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Quick Links -->
+<div style="margin-top:32px">
+    <h2 class="section-title" style="margin-bottom:16px">Quick Actions</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px">
+        <a href="{% url 'core:one_rm' %}" class="card"
+            style="text-align:center;padding:24px;text-decoration:none;cursor:pointer;border:1px solid var(--border)"
+            onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+            <div style="font-size:32px;margin-bottom:8px">⚡</div>
+            <div style="font-weight:600;color:var(--text-primary)">1RM Calculator</div>
+        </a>
+        <a href="{% url 'core:new_workout' %}" class="card" style="text-align:center;padding:24px;text-decoration:none"
+            onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+            <div style="font-size:32px;margin-bottom:8px">🏋️</div>
+            <div style="font-weight:600;color:var(--text-primary)">Log Workout</div>
+        </a>
+        <a href="{% url 'core:add_measurement' %}" class="card"
+            style="text-align:center;padding:24px;text-decoration:none"
+            onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+            <div style="font-size:32px;margin-bottom:8px">📏</div>
+            <div style="font-weight:600;color:var(--text-primary)">Body Measurement</div>
+        </a>
+        <a href="{% url 'core:add_nutrition' %}" class="card"
+            style="text-align:center;padding:24px;text-decoration:none"
+            onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+            <div style="font-size:32px;margin-bottom:8px">🥗</div>
+            <div style="font-weight:600;color:var(--text-primary)">Log Meal</div>
+        </a>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Load 30-day activity data
+    fetch('/api/dashboard-stats/')
+        .then(r => r.json())
+        .then(data => {
+            const labels = data.sessions_per_day.map(d => {
+                const date = new Date(d.date);
+                return date.toLocaleDateString('en', { month: 'short', day: 'numeric' });
+            });
+            const counts = data.sessions_per_day.map(d => d.count);
+
+            const ctx = document.getElementById('activityChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: 'Workouts',
+                        data: counts,
+                        backgroundColor: counts.map(c => c > 0 ? 'rgba(249,115,22,0.8)' : 'rgba(255,255,255,0.05)'),
+                        borderRadius: 4,
+                        borderSkipped: false,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: { stepSize: 1 },
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            max: 3,
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: {
+                                maxTicksLimit: 10,
+                                font: { size: 11 }
+                            }
+                        }
+                    }
+                }
+            });
+        });
+</script>
+{% endblock %}

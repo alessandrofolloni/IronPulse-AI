@@ -1,0 +1,100 @@
+{% extends 'base.html' %}
+{% block title %}{{ session.name|default:"Session" }}{% endblock %}
+{% block page_title %}🏋️ {{ session.name|default:"Workout Session" }}{% endblock %}
+
+{% block topbar_actions %}
+<form action="{% url 'core:delete_workout' session.pk %}" method="post"
+    onsubmit="return confirm('Delete this workout?')">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-danger btn-sm">Delete Session</button>
+</form>
+{% endblock %}
+
+{% block content %}
+<div class="grid-2" style="gap:24px;margin-bottom:28px">
+    <div class="card">
+        <h2 style="font-size:15px;font-weight:700;color:var(--text-primary);margin-bottom:16px">Session Info</h2>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div>
+                <div
+                    style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">
+                    Date</div>
+                <div style="font-weight:600;color:var(--text-primary)">{{ session.date }}</div>
+            </div>
+            <div>
+                <div
+                    style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">
+                    Duration</div>
+                <div style="font-weight:600;color:var(--text-primary)">{% if session.duration_minutes %}{{
+                    session.duration_minutes }} min{% else %}—{% endif %}</div>
+            </div>
+            <div>
+                <div
+                    style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">
+                    Total Sets</div>
+                <div style="font-weight:600;color:var(--accent-light)">{{ sets.count }}</div>
+            </div>
+            {% if session.notes %}
+            <div style="grid-column:span 2">
+                <div
+                    style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">
+                    Notes</div>
+                <div style="font-size:14px;color:var(--text-secondary)">{{ session.notes }}</div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    <div class="card" style="background:linear-gradient(135deg,rgba(249,115,22,.08),rgba(99,102,241,.06))">
+        <h2 style="font-size:15px;font-weight:700;color:var(--text-primary);margin-bottom:16px">Top 1RM This Session
+        </h2>
+        {% with best=sets|dictsortreversed:"one_rm"|first %}
+        {% if best and best.one_rm %}
+        <div style="font-family:'Outfit',sans-serif;font-size:42px;font-weight:800;color:var(--accent-light)">{{
+            best.one_rm }} {{ best.unit }}</div>
+        <div style="color:var(--text-secondary);font-size:14px;margin-top:4px">{{ best.exercise.name }}</div>
+        {% else %}
+        <div style="color:var(--text-muted);font-size:14px">No 1RM data available</div>
+        {% endif %}
+        {% endwith %}
+    </div>
+</div>
+
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Exercise</th>
+                <th>Muscle</th>
+                <th>Weight</th>
+                <th>Reps</th>
+                <th>Est. 1RM</th>
+                <th>Notes</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in sets %}
+            <tr>
+                <td style="color:var(--text-muted)">{{ s.set_number }}</td>
+                <td style="font-weight:600;color:var(--text-primary)">{{ s.exercise.name }}</td>
+                <td><span class="tag tag-{{ s.exercise.muscle_group }}">{{ s.exercise.get_muscle_group_display }}</span>
+                </td>
+                <td>{{ s.weight }} {{ s.unit }}</td>
+                <td>{{ s.reps }}</td>
+                <td style="color:var(--accent-light);font-weight:700">{% if s.one_rm %}{{ s.one_rm }}{% else %}—{% endif
+                    %}</td>
+                <td style="color:var(--text-muted);font-size:13px">{{ s.notes|default:"—" }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="7" style="text-align:center;color:var(--text-muted);padding:32px">No sets recorded</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div style="margin-top:20px">
+    <a href="{% url 'core:workouts' %}" class="btn btn-secondary">← Back to Workouts</a>
+</div>
+{% endblock %}

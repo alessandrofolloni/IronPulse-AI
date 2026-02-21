@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+{% block title %}Workouts{% endblock %}
+{% block page_title %}🏋️ Workout Log{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'core:new_workout' %}" class="btn btn-primary btn-sm">+ Log Workout</a>
+{% endblock %}
+
+{% block content %}
+<div class="section-title">All Workout Sessions</div>
+<p class="section-subtitle">Track your training consistency and volume over time</p>
+
+{% if sessions %}
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Session</th>
+                <th>Date</th>
+                <th>Sets</th>
+                <th>Duration</th>
+                <th>Notes</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in sessions %}
+            <tr>
+                <td>
+                    <a href="{% url 'core:workout_detail' s.pk %}"
+                        style="color:var(--text-primary);font-weight:600;text-decoration:none">
+                        {{ s.name|default:"Workout Session" }}
+                    </a>
+                </td>
+                <td>{{ s.date }}</td>
+                <td><span class="tag" style="background:rgba(249,115,22,.1);color:var(--accent-light)">{{ s.sets.count
+                        }} sets</span></td>
+                <td>{% if s.duration_minutes %}{{ s.duration_minutes }} min{% else %}<span
+                        style="color:var(--text-muted)">—</span>{% endif %}</td>
+                <td
+                    style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)">
+                    {{ s.notes|default:"—" }}</td>
+                <td>
+                    <div style="display:flex;gap:8px">
+                        <a href="{% url 'core:workout_detail' s.pk %}" class="btn btn-secondary btn-sm">View</a>
+                        <form action="{% url 'core:delete_workout' s.pk %}" method="post" style="display:inline"
+                            onsubmit="return confirm('Delete this session?')">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="empty-state">
+    <div class="empty-icon">🏋️</div>
+    <h3>No workouts logged yet</h3>
+    <p>Start tracking your training sessions</p>
+    <a href="{% url 'core:new_workout' %}" class="btn btn-primary">Log Your First Workout</a>
+</div>
+{% endif %}
+{% endblock %}

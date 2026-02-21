@@ -1,0 +1,325 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}1RM Calculator{% endblock %}
+{% block page_title %}⚡ 1RM Calculator{% endblock %}
+
+{% block topbar_actions %}
+<span style="color:var(--text-muted);font-size:13px" id="currentDate"></span>
+{% endblock %}
+
+{% block content %}
+<!-- Hero Intro -->
+<div class="calc-hero">
+    <div style="position:relative;z-index:1">
+        <h1 class="section-title" style="font-size:28px;margin-bottom:8px">One-Rep Max Calculator</h1>
+        <p class="section-subtitle" style="max-width:600px;margin-bottom:0">
+            Find your theoretical maximum lift using 7 scientific formulas. Input your weight and reps to instantly
+            see your 1RM estimate and a full percentage breakdown for programming your training.
+        </p>
+    </div>
+</div>
+
+<div class="grid-2" style="gap:32px;align-items:start">
+    <!-- ── Left: Input Panel ── -->
+    <div>
+        <div class="card" style="margin-bottom:20px">
+            <h2 style="font-size:16px;font-weight:700;margin-bottom:20px;color:var(--text-primary)">Enter Your Lift</h2>
+
+            <div class="form-group">
+                <label class="form-label">Exercise (optional)</label>
+                <select class="form-control" id="exerciseSelect">
+                    <option value="">— Select exercise —</option>
+                    {% for ex in exercises %}
+                    <option value="{{ ex.id }}" data-muscle="{{ ex.muscle_group }}" data-name="{{ ex.name }}">{{ ex.name
+                        }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px" class="form-group">
+                <div>
+                    <label class="form-label">Weight</label>
+                    <input type="number" id="weightInput" class="form-control" placeholder="e.g. 100" min="1" max="1000"
+                        step="0.5">
+                </div>
+                <div>
+                    <label class="form-label">Unit</label>
+                    <select class="form-control" id="unitSelect">
+                        <option value="kg">kg</option>
+                        <option value="lbs">lbs</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" style="display:flex;align-items:center;justify-content:space-between">
+                    <span>Reps Performed</span>
+                    <span id="repsDisplay" style="color:var(--accent-light);font-size:14px;font-weight:700">1</span>
+                </label>
+                <input type="range" id="repsRange" min="1" max="20" value="1"
+                    style="width:100%;accent-color:var(--accent);height:6px;border-radius:4px;cursor:pointer;background:rgba(255,255,255,.1)">
+                <div
+                    style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-top:4px">
+                    <span>1 rep</span><span>5</span><span>10</span><span>15</span><span>20 reps</span>
+                </div>
+            </div>
+
+            <button class="btn btn-primary btn-lg glow-pulse" onclick="calculate1RM()" style="width:100%">
+                ⚡ Calculate 1RM
+            </button>
+        </div>
+
+        <!-- Insights -->
+        <div class="card">
+            <h3 style="font-size:14px;font-weight:700;margin-bottom:16px;color:var(--text-primary)">📚 Training Insights
+            </h3>
+
+            <div class="insight-card">
+                <div class="insight-title">What is 1RM?</div>
+                <div class="insight-text">Your One-Rep Max is the maximum weight you can lift for a single repetition
+                    with proper form. It's the gold standard for measuring absolute strength.</div>
+            </div>
+
+            <div class="insight-card indigo" style="margin-top:12px">
+                <div class="insight-title">📐 Formula Accuracy</div>
+                <div class="insight-text">Formulas are most accurate for 1–10 reps. Beyond 15 reps, estimates can vary
+                    significantly. The Epley formula is most commonly used in powerlifting.</div>
+            </div>
+
+            <div class="insight-card green" style="margin-top:12px">
+                <div class="insight-title">⚠️ Safety First</div>
+                <div class="insight-text">Always warm up properly before attempting heavy loads. Never test your true
+                    1RM without a spotter. Use these numbers for programming, not reckless testing.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Right: Results ── -->
+    <div id="resultsPanel">
+        <!-- Placeholder -->
+        <div class="card" id="placeholderCard" style="text-align:center;padding:60px 24px">
+            <div style="font-size:64px;margin-bottom:16px;opacity:.3">⚡</div>
+            <h3 style="color:var(--text-secondary);margin-bottom:8px">Your 1RM Awaits</h3>
+            <p style="color:var(--text-muted);font-size:14px">Enter weight and reps, then hit Calculate</p>
+        </div>
+
+        <!-- Results (hidden until calculated) -->
+        <div id="resultsContent" style="display:none">
+
+            <!-- Big number -->
+            <div class="card"
+                style="margin-bottom:20px;text-align:center;background:linear-gradient(135deg,rgba(249,115,22,.08),rgba(99,102,241,.06))">
+                <div
+                    style="font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted);margin-bottom:8px">
+                    Estimated 1RM (Average)</div>
+                <span class="result-number" id="avgResult">—</span>
+                <div class="result-unit" id="resultUnit">kg</div>
+                <div style="margin-top:16px;color:var(--text-secondary);font-size:14px" id="inputSummary"></div>
+            </div>
+
+            <!-- Formula breakdown -->
+            <div class="card" style="margin-bottom:20px">
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:16px;color:var(--text-primary)">🔬 Formula
+                    Breakdown</h3>
+                <div class="formula-grid" id="formulaGrid"></div>
+            </div>
+
+            <!-- Percentage table -->
+            <div class="card" style="margin-bottom:20px">
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:16px;color:var(--text-primary)">📊 Training Load
+                    Table</h3>
+                <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">
+                    Based on your estimated 1RM, here are the recommended weights for different rep ranges and
+                    intensities.
+                </p>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>% 1RM</th>
+                                <th>Weight</th>
+                                <th>Est. Max Reps</th>
+                                <th>Training Zone</th>
+                            </tr>
+                        </thead>
+                        <tbody id="percentTable"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Chart -->
+            <div class="card">
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:16px;color:var(--text-primary)">📈 Load Curve
+                </h3>
+                <div class="chart-container">
+                    <canvas id="loadChart"></canvas>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<!-- History -->
+{% if history %}
+<div style="margin-top:40px">
+    <h2 class="section-title">Recent Set History</h2>
+    <p class="section-subtitle">Your last 20 logged sets with calculated 1RM</p>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Exercise</th>
+                    <th>Weight</th>
+                    <th>Reps</th>
+                    <th>Est. 1RM</th>
+                    <th>Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in history %}
+                <tr>
+                    <td style="color:var(--text-primary);font-weight:500">{{ s.exercise.name }}</td>
+                    <td>{{ s.weight }} {{ s.unit }}</td>
+                    <td>{{ s.reps }}</td>
+                    <td style="color:var(--accent-light);font-weight:700">
+                        {% if s.one_rm %}{{ s.one_rm }} {{ s.unit }}{% else %}—{% endif %}
+                    </td>
+                    <td style="color:var(--text-muted);font-size:13px">{{ s.session.date }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const weightInput = document.getElementById('weightInput');
+    const repsRange = document.getElementById('repsRange');
+    const repsDisplay = document.getElementById('repsDisplay');
+    const unitSelect = document.getElementById('unitSelect');
+    let loadChart = null;
+
+    repsRange.addEventListener('input', () => {
+        repsDisplay.textContent = repsRange.value;
+    });
+
+    function calculate1RM() {
+        const weight = parseFloat(weightInput.value);
+        const reps = parseInt(repsRange.value);
+        const unit = unitSelect.value;
+
+        if (!weight || weight <= 0) {
+            weightInput.style.borderColor = 'var(--danger)';
+            weightInput.focus();
+            return;
+        }
+        weightInput.style.borderColor = '';
+
+        fetch(`/api/one-rm/?weight=${weight}&reps=${reps}&unit=${unit}`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) { alert(data.error); return; }
+                displayResults(data);
+            })
+            .catch(e => console.error(e));
+    }
+
+    function displayResults(data) {
+        document.getElementById('placeholderCard').style.display = 'none';
+        document.getElementById('resultsContent').style.display = 'block';
+
+        // Big number
+        document.getElementById('avgResult').textContent = data.average;
+        document.getElementById('resultUnit').textContent = data.unit;
+        document.getElementById('inputSummary').textContent =
+            `Based on ${data.weight}${data.unit} × ${data.reps} rep${data.reps > 1 ? 's' : ''}`;
+
+        // Formula grid
+        const grid = document.getElementById('formulaGrid');
+        grid.innerHTML = '';
+        const formulaNames = {
+            epley: 'Epley', brzycki: 'Brzycki', lander: 'Lander',
+            lombardi: 'Lombardi', mayhew: 'Mayhew', oconner: "O'Conner", wathan: 'Wathan'
+        };
+        Object.entries(data.formulas).forEach(([key, val]) => {
+            grid.innerHTML += `
+      <div class="formula-card">
+        <div class="formula-name">${formulaNames[key] || key}</div>
+        <div class="formula-value">${val}</div>
+        <div style="font-size:11px;color:var(--text-muted)">${data.unit}</div>
+      </div>`;
+        });
+
+        // Percent table
+        const tbody = document.getElementById('percentTable');
+        const zones = {
+            100: 'Max Strength', 95: 'Near-Max', 90: 'Strength', 85: 'Strength',
+            80: 'Hypertrophy', 75: 'Hypertrophy', 70: 'Hypertrophy', 65: 'Endurance',
+            60: 'Endurance', 55: 'Endurance', 50: 'Warm-Up',
+        };
+        tbody.innerHTML = '';
+        data.percent_table.forEach(row => {
+            const zone = zones[row.percent] || '';
+            tbody.innerHTML += `
+      <tr class="percent-row">
+        <td>${row.percent}%</td>
+        <td style="color:var(--text-primary);font-weight:600">${row.weight} ${data.unit}</td>
+        <td>${row.est_reps} rep${row.est_reps > 1 ? 's' : ''}</td>
+        <td><span class="tag" style="background:rgba(249,115,22,.1);color:var(--accent-light)">${zone}</span></td>
+      </tr>`;
+        });
+
+        // Chart
+        const labels = data.percent_table.map(r => `${r.percent}%`);
+        const weights = data.percent_table.map(r => r.weight);
+
+        if (loadChart) loadChart.destroy();
+        const ctx = document.getElementById('loadChart').getContext('2d');
+        loadChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [{
+                    label: `Weight (${data.unit})`,
+                    data: weights,
+                    backgroundColor: weights.map((_, i) =>
+                        `hsla(${22 + i * 9}, 90%, ${60 - i * 2}%, 0.8)`
+                    ),
+                    borderRadius: 6,
+                    borderSkipped: false,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: ctx => ` ${ctx.parsed.y} ${data.unit}`
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: false,
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { callback: v => `${v}${data.unit}` }
+                    },
+                    x: {
+                        grid: { display: false }
+                    }
+                }
+            }
+        });
+    }
+
+    // Allow Enter key
+    weightInput.addEventListener('keydown', e => { if (e.key === 'Enter') calculate1RM(); });
+</script>
+{% endblock %}

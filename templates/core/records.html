@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+{% block title %}Personal Records{% endblock %}
+{% block page_title %}🏆 Personal Records{% endblock %}
+
+{% block content %}
+<div class="section-title">Personal Records</div>
+<p class="section-subtitle">Your all-time best lifts, automatically tracked from your workouts</p>
+
+{% if records %}
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Exercise</th>
+                <th>Muscle Group</th>
+                <th>Weight × Reps</th>
+                <th>Estimated 1RM</th>
+                <th>Date</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for pr in records %}
+            <tr>
+                <td style="font-weight:600;color:var(--text-primary)">{{ pr.exercise.name }}</td>
+                <td><span class="tag tag-{{ pr.exercise.muscle_group }}">{{ pr.exercise.get_muscle_group_display
+                        }}</span></td>
+                <td>{{ pr.weight }}{{ pr.unit }} × {{ pr.reps }}</td>
+                <td>
+                    <span
+                        style="font-family:'Outfit',sans-serif;font-size:20px;font-weight:700;color:var(--accent-light)">
+                        {{ pr.one_rm }} {{ pr.unit }}
+                    </span>
+                </td>
+                <td style="color:var(--text-muted);font-size:13px">{{ pr.date }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="empty-state">
+    <div class="empty-icon">🏆</div>
+    <h3>No personal records yet</h3>
+    <p>Log workouts to automatically track your PRs!</p>
+    <a href="{% url 'core:new_workout' %}" class="btn btn-primary">Log a Workout</a>
+</div>
+{% endif %}
+{% endblock %}

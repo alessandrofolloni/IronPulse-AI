@@ -1,0 +1,58 @@
+{% extends 'base.html' %}
+{% block title %}Exercises{% endblock %}
+{% block page_title %}📋 Exercise Library{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'core:add_exercise' %}" class="btn btn-primary btn-sm">+ Add Exercise</a>
+{% endblock %}
+
+{% block content %}
+<div class="section-title">Exercise Library</div>
+<p class="section-subtitle">Browse and manage your exercise database</p>
+
+<!-- Filter -->
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:28px">
+    <a href="{% url 'core:exercises' %}"
+        class="btn {% if not muscle_filter %}btn-primary{% else %}btn-secondary{% endif %} btn-sm">All</a>
+    {% for val, label in muscle_choices %}
+    <a href="?muscle={{ val }}"
+        class="btn {% if muscle_filter == val %}btn-primary{% else %}btn-secondary{% endif %} btn-sm">{{ label }}</a>
+    {% endfor %}
+</div>
+
+{% if exercises %}
+<div class="grid-auto">
+    {% for ex in exercises %}
+    <div class="card" style="border-top:3px solid var(--accent);transition:all .2s"
+        onmouseover="this.style.transform='translateY(-4px)'" onmouseout="this.style.transform='translateY(0)'">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <span class="tag tag-{{ ex.muscle_group }}">{{ ex.get_muscle_group_display }}</span>
+            <span class="tag tag-{{ ex.difficulty }}">{{ ex.get_difficulty_display }}</span>
+        </div>
+        <h3 style="font-size:16px;font-weight:700;color:var(--text-primary);margin-bottom:8px">{{ ex.name }}</h3>
+        {% if ex.description %}
+        <p style="font-size:13px;color:var(--text-secondary);line-height:1.6;margin-bottom:12px">{{
+            ex.description|truncatechars:100 }}</p>
+        {% endif %}
+        <div style="display:flex;align-items:center;justify-content:space-between">
+            <span style="font-size:12px;color:var(--text-muted)">
+                {% if ex.is_compound %}🔗 Compound{% else %}🎯 Isolation{% endif %}
+            </span>
+            <form action="{% url 'core:delete_exercise' ex.pk %}" method="post"
+                onsubmit="return confirm('Delete {{ ex.name }}?')">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+            </form>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+    <div class="empty-icon">📋</div>
+    <h3>No exercises found</h3>
+    <p>Add some exercises to your library</p>
+    <a href="{% url 'core:add_exercise' %}" class="btn btn-primary">Add Exercise</a>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,135 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description"
+    content="IronPulse — Your personal gym management platform for tracking workouts, 1RM, nutrition, and goals.">
+  <title>{% block title %}IronPulse{% endblock %} — Fitness Management</title>
+  <link rel="stylesheet" href="{% static 'css/main.css' %}">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+
+<body>
+
+  <!-- ── Sidebar ──────────────────────────────────────────────── -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon">⚡</div>
+      <span class="logo-text">IronPulse</span>
+    </div>
+
+    <nav class="sidebar-nav">
+      <span class="nav-section-label">Overview</span>
+
+      <a href="{% url 'core:dashboard' %}" class="nav-item {% if active_tab == 'dashboard' %}active{% endif %}">
+        <span class="nav-icon">🏠</span>
+        <span>Dashboard</span>
+      </a>
+
+      <span class="nav-section-label" style="margin-top:12px">Training</span>
+
+      <a href="{% url 'core:one_rm' %}" class="nav-item {% if active_tab == 'one_rm' %}active{% endif %}">
+        <span class="nav-icon">⚡</span>
+        <span>1RM Calculator</span>
+      </a>
+
+      <a href="{% url 'core:workouts' %}" class="nav-item {% if active_tab == 'workouts' %}active{% endif %}">
+        <span class="nav-icon">🏋️</span>
+        <span>Workouts</span>
+      </a>
+
+      <a href="{% url 'core:exercises' %}" class="nav-item {% if active_tab == 'exercises' %}active{% endif %}">
+        <span class="nav-icon">📋</span>
+        <span>Exercises</span>
+      </a>
+
+      <a href="{% url 'core:records' %}" class="nav-item {% if active_tab == 'records' %}active{% endif %}">
+        <span class="nav-icon">🏆</span>
+        <span>Personal Records</span>
+      </a>
+
+      <span class="nav-section-label" style="margin-top:12px">Health</span>
+
+      <a href="{% url 'core:measurements' %}" class="nav-item {% if active_tab == 'measurements' %}active{% endif %}">
+        <span class="nav-icon">📏</span>
+        <span>Body Measurements</span>
+      </a>
+
+      <a href="{% url 'core:nutrition' %}" class="nav-item {% if active_tab == 'nutrition' %}active{% endif %}">
+        <span class="nav-icon">🥗</span>
+        <span>Nutrition Log</span>
+      </a>
+
+      <a href="{% url 'core:goals' %}" class="nav-item {% if active_tab == 'goals' %}active{% endif %}">
+        <span class="nav-icon">🎯</span>
+        <span>Goals</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <a href="/admin/" class="nav-item">
+        <span class="nav-icon">⚙️</span>
+        <span>Admin Panel</span>
+      </a>
+    </div>
+  </aside>
+
+  <!-- ── Main ─────────────────────────────────────────────────── -->
+  <div class="main-content">
+    <header class="topbar">
+      <button id="menuToggle" class="btn btn-secondary btn-icon" style="display:none" onclick="toggleSidebar()"
+        aria-label="Toggle menu">☰</button>
+      <div class="topbar-title">{% block page_title %}IronPulse{% endblock %}</div>
+      <div class="topbar-actions">
+        {% block topbar_actions %}
+        <span style="color:var(--text-muted);font-size:13px" id="currentDate"></span>
+        {% endblock %}
+      </div>
+    </header>
+
+    <main class="page-content fade-in">
+      {% if messages %}
+      {% for message in messages %}
+      <div class="alert alert-{{ message.tags }}">
+        {{ message }}
+      </div>
+      {% endfor %}
+      {% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  <script>
+    // Date display
+    const dateEl = document.getElementById('currentDate');
+    if (dateEl) {
+      dateEl.textContent = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+    }
+
+    // Mobile sidebar toggle
+    function toggleSidebar() {
+      document.getElementById('sidebar').classList.toggle('open');
+    }
+
+    // Show hamburger on small screens
+    if (window.innerWidth <= 768) {
+      document.getElementById('menuToggle').style.display = 'flex';
+    }
+    window.addEventListener('resize', () => {
+      const btn = document.getElementById('menuToggle');
+      if (btn) btn.style.display = window.innerWidth <= 768 ? 'flex' : 'none';
+    });
+
+    // Chart.js global defaults
+    Chart.defaults.color = '#94a3b8';
+    Chart.defaults.borderColor = 'rgba(255,255,255,0.07)';
+    Chart.defaults.font.family = "'Inter', sans-serif";
+  </script>
+
+  {% block extra_js %}{% endblock %}
+</body>
+
+</html>

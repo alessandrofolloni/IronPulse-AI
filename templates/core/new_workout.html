@@ -1,0 +1,134 @@
+{% extends 'base.html' %}
+{% block title %}Log Workout{% endblock %}
+{% block page_title %}🏋️ Log Workout{% endblock %}
+
+{% block content %}
+<div class="section-title">New Workout Session</div>
+<p class="section-subtitle">Add exercises and sets for this session</p>
+
+<form method="post" id="workoutForm">
+    {% csrf_token %}
+    <input type="hidden" name="sets_json" id="setsJson" value="[]">
+
+    <div class="grid-2" style="gap:24px;align-items:start">
+        <div>
+            <div class="card" style="margin-bottom:20px">
+                <h3 style="font-size:15px;font-weight:700;margin-bottom:16px;color:var(--text-primary)">Session Details
+                </h3>
+                <div class="form-group">
+                    <label class="form-label">Session Name</label>
+                    <input type="text" name="name" class="form-control" placeholder="e.g. Push Day, Chest & Tris...">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Date</label>
+                    <input type="date" name="date" class="form-control" id="sessionDate">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Duration (minutes)</label>
+                    <input type="number" name="duration_minutes" class="form-control" placeholder="e.g. 60" min="1">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Notes</label>
+                    <textarea name="notes" class="form-control"
+                        placeholder="How did it go? Energy levels, PRs, etc."></textarea>
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary" style="width:100%" onclick="packSets()">💾 Save
+                Workout</button>
+            <a href="{% url 'core:workouts' %}" class="btn btn-secondary" style="width:100%;margin-top:8px">Cancel</a>
+        </div>
+
+        <div>
+            <div class="card">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+                    <h3 style="font-size:15px;font-weight:700;color:var(--text-primary)">Exercise Sets</h3>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="addSetRow()">+ Add Set</button>
+                </div>
+
+                <div id="setsContainer"></div>
+
+                <div id="emptySetsMsg" style="text-align:center;padding:30px;color:var(--text-muted);font-size:14px">
+                    Click <strong>+ Add Set</strong> to add exercises
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+
+<script>
+    const exercises = [
+        {% for ex in exercises %}
+    { id: { { ex.id } }, name: "{{ ex.name }}", muscle: "{{ ex.get_muscle_group_display }}" },
+    {% endfor %}
+];
+
+    const sets = [];
+
+    // Set today's date
+    document.getElementById('sessionDate').value = new Date().toISOString().split('T')[0];
+
+    function addSetRow() {
+        const container = document.getElementById('setsContainer');
+        document.getElementById('emptySetsMsg').style.display = 'none';
+        const idx = sets.length;
+        sets.push({ exercise_id: '', weight: '', reps: '', unit: 'kg' });
+
+        const row = document.createElement('div');
+        row.className = 'set-row';
+        row.id = `set-${idx}`;
+        row.innerHTML = `
+    <div>
+      <label class="form-label" style="font-size:11px">Exercise</label>
+      <select class="form-control" onchange="sets[${idx}].exercise_id = this.value">
+        <option value="">— Pick exercise —</option>
+        ${exercises.map(e => `<option value="${e.id}">${e.name} (${e.muscle})</option>`).join('')}
+      </select>
+    </div>
+    <div>
+      <label class="form-label" style="font-size:11px">Weight</label>
+      <input type="number" class="form-control" placeholder="0" step="0.5"
+             onchange="sets[${idx}].weight = this.value; updateOneRM(${idx})">
+    </div>
+    <div>
+      <label class="form-label" style="font-size:11px">Reps</label>
+      <input type="number" class="form-control" placeholder="0" min="1"
+             onchange="sets[${idx}].reps = this.value; updateOneRM(${idx})">
+    </div>
+    <div>
+      <label class="form-label" style="font-size:11px">Unit</label>
+      <select class="form-control" onchange="sets[${idx}].unit = this.value">
+        <option value="kg">kg</option>
+        <option value="lbs">lbs</option>
+      </select>
+    </div>
+    <div style="display:flex;align-items:flex-end;gap:8px">
+      <div style="font-size:11px;color:var(--accent-light);font-weight:700;min-width:60px" id="orm-${idx}">—</div>
+      <button type="button" onclick="removeSet(${idx})" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);color:#f87171;border-radius:6px;padding:8px;cursor:pointer;font-size:14px">✕</button>
+    </div>
+  `;
+        container.appendChild(row);
+    }
+
+    function updateOneRM(idx) {
+        const s = sets[idx];
+        if (s.weight && s.reps && parseInt(s.reps) >= 1) {
+            const oneRM = s.weight * (1 + parseInt(s.reps) / 30);
+            document.getElementById(`orm-${idx}`).textContent = `1RM≈${oneRM.toFixed(1)}`;
+        }
+    }
+
+    function removeSet(idx) {
+        const row = document.getElementById(`set-${idx}`);
+        if (row) row.remove();
+        sets[idx] = null;
+        if (document.querySelectorAll('.set-row').length === 0) {
+            document.getElementById('emptySetsMsg').style.display = 'block';
+        }
+    }
+
+    function packSets() {
+        const validSets = sets.filter(s => s && s.exercise_id);
+        document.getElementById('setsJson').value = JSON.stringify(validSets);
+    }
+</script>
+{% endblock %}

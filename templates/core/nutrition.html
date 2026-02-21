@@ -1,0 +1,74 @@
+{% extends 'base.html' %}
+{% block title %}Nutrition Log{% endblock %}
+{% block page_title %}🥗 Nutrition Log{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'core:add_nutrition' %}" class="btn btn-primary btn-sm">+ Log Meal</a>
+{% endblock %}
+
+{% block content %}
+<div class="section-title">Nutrition Tracker</div>
+<p class="section-subtitle">Monitor your daily calorie and macro intake</p>
+
+<!-- Today's summary -->
+<div class="stats-grid" style="margin-bottom:28px">
+    <div class="stat-card accent">
+        <span class="stat-icon">🔥</span>
+        <div class="stat-value">{{ today_summary.cal|default:0 }}</div>
+        <div class="stat-label">Calories Today</div>
+    </div>
+    <div class="stat-card indigo">
+        <span class="stat-icon">💪</span>
+        <div class="stat-value">{{ today_summary.protein|default:0|floatformat:0 }}g</div>
+        <div class="stat-label">Protein Today</div>
+    </div>
+    <div class="stat-card yellow">
+        <span class="stat-icon">🌾</span>
+        <div class="stat-value">{{ today_summary.carbs|default:0|floatformat:0 }}g</div>
+        <div class="stat-label">Carbs Today</div>
+    </div>
+    <div class="stat-card green">
+        <span class="stat-icon">🥑</span>
+        <div class="stat-value">{{ today_summary.fat|default:0|floatformat:0 }}g</div>
+        <div class="stat-label">Fat Today</div>
+    </div>
+</div>
+
+{% if logs %}
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Meal</th>
+                <th>Calories</th>
+                <th>Protein</th>
+                <th>Carbs</th>
+                <th>Fat</th>
+                <th>Notes</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in logs %}
+            <tr>
+                <td style="color:var(--text-muted);font-size:13px">{{ log.date }}</td>
+                <td style="font-weight:600;color:var(--text-primary)">{{ log.meal_name }}</td>
+                <td><span style="color:var(--accent-light);font-weight:700">{{ log.calories|default:"—" }}</span></td>
+                <td>{% if log.protein_g %}{{ log.protein_g }}g{% else %}—{% endif %}</td>
+                <td>{% if log.carbs_g %}{{ log.carbs_g }}g{% else %}—{% endif %}</td>
+                <td>{% if log.fat_g %}{{ log.fat_g }}g{% else %}—{% endif %}</td>
+                <td style="color:var(--text-muted);font-size:13px">{{ log.notes|default:"—" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="empty-state">
+    <div class="empty-icon">🥗</div>
+    <h3>No meals logged yet</h3>
+    <p>Start tracking your nutrition</p>
+    <a href="{% url 'core:add_nutrition' %}" class="btn btn-primary">Log First Meal</a>
+</div>
+{% endif %}
+{% endblock %}
