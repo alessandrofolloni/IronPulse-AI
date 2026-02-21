@@ -58,3 +58,16 @@ class GoalForm(forms.ModelForm):
             'deadline': forms.DateInput(attrs={'type': 'date'}),
             'description': forms.Textarea(attrs={'rows': 3}),
         }
+
+
+class WorkoutPlanForm(forms.ModelForm):
+    class Meta:
+        model = ('WorkoutPlan', 'placeholder') # Temporary hack to avoid import error if models not ready
+        model = None # Will set below
+        fields = ['title', 'description', 'is_active']
+        widgets = {
+            'description': forms.Textarea(attrs={'rows': 3}),
+        }
+
+from .models import WorkoutPlan
+WorkoutPlanForm.Meta.model = WorkoutPlan

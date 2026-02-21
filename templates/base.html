@@ -51,6 +51,18 @@
         <span>Personal Records</span>
       </a>
 
+      <a href="{% url 'core:plans' %}" class="nav-item {% if active_tab == 'plans' %}active{% endif %}">
+        <span class="nav-icon">🗺️</span>
+        <span>Training Plans</span>
+      </a>
+
+      <span class="nav-section-label" style="margin-top:12px">Intelligence</span>
+
+      <a href="{% url 'core:ai_lab' %}" class="nav-item {% if active_tab == 'ai_lab' %}active{% endif %}">
+        <span class="nav-icon">🧠</span>
+        <span>PulseMind AI</span>
+      </a>
+
       <span class="nav-section-label" style="margin-top:12px">Health</span>
 
       <a href="{% url 'core:measurements' %}" class="nav-item {% if active_tab == 'measurements' %}active{% endif %}">

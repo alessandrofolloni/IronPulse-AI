@@ -44,9 +44,11 @@ class Exercise(models.Model):
 
 class WorkoutSession(models.Model):
     name = models.CharField(max_length=200, blank=True)
-    date = models.DateField(default=timezone.now)
+    date = models.DateField(default=timezone.now, db_index=True)
     notes = models.TextField(blank=True)
     duration_minutes = models.PositiveIntegerField(null=True, blank=True)
+    # Link to a plan day if this workout was based on a planned session
+    planned_day = models.ForeignKey('PlanDay', on_delete=models.SET_NULL, null=True, blank=True, related_name='executed_sessions')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -54,6 +56,56 @@ class WorkoutSession(models.Model):
 
     class Meta:
         ordering = ['-date']
+
+
+class WorkoutPlan(models.Model):
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    is_ai_generated = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.title
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class PlanDay(models.Model):
+    plan = models.ForeignKey(WorkoutPlan, on_delete=models.CASCADE, related_name='days')
+    name = models.CharField(max_length=100)
+    day_number = models.PositiveIntegerField()
+
+    class Meta:
+        ordering = ['day_number']
+
+    def __str__(self):
+        return f"{self.plan.title} - {self.name}"
+
+
+class PlanExercise(models.Model):
+    plan_day = models.ForeignKey(PlanDay, on_delete=models.CASCADE, related_name='exercises')
+    exercise = models.ForeignKey(Exercise, on_delete=models.CASCADE)
+    sets = models.PositiveIntegerField(default=3)
+    reps = models.CharField(max_length=50, default="8-12")
+    target_weight = models.FloatField(null=True, blank=True)
+    notes = models.CharField(max_length=300, blank=True)
+
+    def __str__(self):
+        return f"{self.exercise.name} in {self.plan_day.name}"
+
+
+class AIModelMetadata(models.Model):
+    model_name = models.CharField(max_length=100, default="PulseMind v1")
+    version = models.FloatField(default=1.0)
+    last_trained = models.DateTimeField(null=True, blank=True)
+    accuracy = models.FloatField(null=True, blank=True)
+    total_training_samples = models.PositiveIntegerField(default=0)
+    weights_info = models.JSONField(null=True, blank=True) # To store simple model parameters
+
+    def __str__(self):
+        return f"{self.model_name} v{self.version}"
 
 
 class WorkoutSet(models.Model):

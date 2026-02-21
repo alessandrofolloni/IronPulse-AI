@@ -1,0 +1,55 @@
+{% extends 'base.html' %}
+{% block title %}Training Plans{% endblock %}
+{% block page_title %}🗺️ Training Strategy{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'core:ai_lab' %}" class="btn btn-secondary btn-sm">🧠 Generate AI Plan</a>
+{% endblock %}
+
+{% block content %}
+<div class="section-title">Workout Plans</div>
+<p class="section-subtitle">Manage your long-term training strategy and AI-generated protocols.</p>
+
+{% if plans %}
+<div class="grid-auto">
+    {% for plan in plans %}
+    <div class="card"
+        style="display:flex;flex-direction:column;justify-content:space-between;border-top:3px solid {% if plan.is_ai_generated %}var(--accent){% else %}var(--accent2){% endif %}">
+        <div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:12px">
+                <span class="tag {% if plan.is_active %}tag-active{% else %}tag-paused{% endif %}">
+                    {% if plan.is_active %}Active{% else %}Inactive{% endif %}
+                </span>
+                {% if plan.is_ai_generated %}
+                <span class="tag tag-indigo">🤖 AI Generated</span>
+                {% endif %}
+            </div>
+            <h3 style="margin-bottom:8px">{{ plan.title }}</h3>
+            <p style="font-size:13px;color:var(--text-secondary);margin-bottom:20px">{{
+                plan.description|truncatechars:120 }}</p>
+        </div>
+
+        <div
+            style="display:flex;align-items:center;justify-content:space-between;border-top:1px solid var(--border);padding-top:16px">
+            <span style="font-size:12px;color:var(--text-muted)">{{ plan.days.count }} Training Days</span>
+            <a href="{% url 'core:plan_detail' plan.pk %}" class="btn btn-primary btn-sm">View Plan</a>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+    <div class="empty-icon">🗺️</div>
+    <h3>No plans found</h3>
+    <p>Go to the AI Lab to generate your first personalized training strategy.</p>
+    <a href="{% url 'core:ai_lab' %}" class="btn btn-primary">Visit AI Lab</a>
+</div>
+{% endif %}
+
+<style>
+    .tag-indigo {
+        background: rgba(99, 102, 241, .15);
+        color: #818cf8;
+    }
+</style>
+{% endblock %}

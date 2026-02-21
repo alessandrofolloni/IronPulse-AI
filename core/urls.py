@@ -22,8 +22,13 @@ urlpatterns = [
     path('goals/add/', views.add_goal, name='add_goal'),
     path('goals/<int:pk>/update/', views.update_goal, name='update_goal'),
     path('records/', views.personal_records, name='records'),
+    path('plans/', views.plans, name='plans'),
+    path('plans/<int:pk>/', views.plan_detail, name='plan_detail'),
+    path('ai-lab/', views.ai_laboratory, name='ai_lab'),
     # API endpoints
     path('api/one-rm/', views.api_one_rm, name='api_one_rm'),
     path('api/exercise-history/<int:exercise_id>/', views.api_exercise_history, name='api_exercise_history'),
     path('api/dashboard-stats/', views.api_dashboard_stats, name='api_dashboard_stats'),
+    path('api/ai/train/', views.api_train_ai, name='api_train_ai'),
+    path('api/ai/generate-plan/', views.api_generate_plan, name='api_generate_plan'),
 ]

@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+{% block title %}{{ plan.title }}{% endblock %}
+{% block page_title %}🗺️ Plan Details{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:32px">
+    <a href="{% url 'core:plans' %}" style="color:var(--text-muted);text-decoration:none;font-size:13px">← Back to
+        Plans</a>
+    <div style="display:flex;align-items:center;gap:12px;margin-top:12px">
+        <h1 class="section-title" style="margin-bottom:0;font-size:28px">{{ plan.title }}</h1>
+        {% if plan.is_ai_generated %}<span class="tag tag-indigo">🤖 AI Generated</span>{% endif %}
+    </div>
+    <p style="color:var(--text-secondary);margin-top:8px;max-width:700px">{{ plan.description }}</p>
+</div>
+
+{% if days %}
+<div style="display:flex;flex-direction:column;gap:32px">
+    {% for day in days %}
+    <div class="card" style="padding:0;overflow:hidden">
+        <div
+            style="background:rgba(255,255,255,0.02);padding:20px 24px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+            <h3 style="font-size:18px">Day {{ day.day_number }}: {{ day.name }}</h3>
+            <span class="tag">{{ day.exercises.count }} Exercises</span>
+        </div>
+
+        <div class="table-wrap" style="border:none;border-radius:0">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Exercise</th>
+                        <th>Muscle</th>
+                        <th>Sets</th>
+                        <th>Reps</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for pe in day.exercises.all %}
+                    <tr>
+                        <td style="font-weight:600;color:var(--text-primary)">{{ pe.exercise.name }}</td>
+                        <td><span class="tag tag-{{ pe.exercise.muscle_group }}">{{ pe.exercise.get_muscle_group_display
+                                }}</span></td>
+                        <td>{{ pe.sets }}</td>
+                        <td>{{ pe.reps }}</td>
+                        <td style="color:var(--text-muted);font-size:13px">{{ pe.notes|default:"—" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+    <p>This plan has no training days yet.</p>
+</div>
+{% endif %}
+
+<style>
+    .tag-indigo {
+        background: rgba(99, 102, 241, .15);
+        color: #818cf8;
+    }
+</style>
+{% endblock %}

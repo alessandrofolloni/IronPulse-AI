@@ -1,0 +1,162 @@
+{% extends 'base.html' %}
+{% block title %}PulseMind AI Lab{% endblock %}
+{% block page_title %}🧠 PulseMind Intelligence Lab{% endblock %}
+
+{% block content %}
+<div class="section-title">AI Laboratory</div>
+<p class="section-subtitle">Train and manage your custom neural network for workout optimization.</p>
+
+<div class="grid-2">
+    <!-- Model Status Card -->
+    <div class="card" style="position:relative;overflow:hidden">
+        <div style="position:absolute;top:0;right:0;padding:20px;font-size:48px;opacity:0.1">🧠</div>
+        <h3 style="margin-bottom:20px">Model Status</h3>
+
+        <div style="display:flex;flex-direction:column;gap:16px">
+            <div
+                style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding-bottom:12px">
+                <span style="color:var(--text-secondary)">Engine Name</span>
+                <span style="font-weight:700;color:var(--accent-light)">{{ metadata.model_name }}</span>
+            </div>
+            <div
+                style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding-bottom:12px">
+                <span style="color:var(--text-secondary)">Version</span>
+                <span>{{ metadata.version }}</span>
+            </div>
+            <div
+                style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding-bottom:12px">
+                <span style="color:var(--text-secondary)">Last Trained</span>
+                <span id="last-trained">{% if metadata.last_trained %}{{ metadata.last_trained|date:"Y-m-d H:i" }}{%
+                    else %}Never{% endif %}</span>
+            </div>
+            <div
+                style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding-bottom:12px">
+                <span style="color:var(--text-secondary)">Reported Accuracy</span>
+                <span style="font-weight:700;color:var(--success)" id="accuracy">{% if metadata.accuracy %}{{
+                    metadata.accuracy|floatformat:2 }}%{% else %}N/A{% endif %}</span>
+            </div>
+        </div>
+
+        <div style="margin-top:24px">
+            <button id="btn-train" class="btn btn-primary btn-lg" style="width:100%">🚀 Re-Train Neural Network</button>
+            <p style="font-size:11px;color:var(--text-muted);text-align:center;margin-top:12px">
+                This process runs a custom backpropagation loop on your training data.
+            </p>
+        </div>
+    </div>
+
+    <!-- Optimization Tools -->
+    <div class="card">
+        <h3 style="margin-bottom:20px">Automation & Insights</h3>
+        <p style="color:var(--text-secondary);margin-bottom:24px">
+            Use the current model weights to generate high-performance training structures.
+        </p>
+
+        <div style="display:flex;flex-direction:column;gap:16px">
+            <div class="insight-card indigo" style="cursor:pointer" id="btn-generate">
+                <div class="insight-title">✨ Generate AI Workout Plan</div>
+                <div class="insight-text">Create a 3-day split optimized for your current recovery scores and PRs.</div>
+            </div>
+
+            <div class="insight-card">
+                <div class="insight-title">📊 Predictive Volume Analysis</div>
+                <div class="insight-text">Calculate recommended set volume for the coming week to avoid overtraining.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Training Terminal -->
+<div class="card" style="margin-top:24px;background:#0a0a0a;border-color:#333;font-family:monospace;padding:24px">
+    <div style="display:flex;justify-content:space-between;margin-bottom:12px;color:#00ff00;font-size:12px">
+        <span>PULSEMIND INTEGRITY CONSOLE</span>
+        <span id="console-status">READY</span>
+    </div>
+    <div id="console-output" style="height:200px;overflow-y:auto;color:#ccc;font-size:13px;line-height:1.6">
+        <div>> System initialized. Waiting for instruction...</div>
+    </div>
+</div>
+
+<script>
+    const consoleOutput = document.getElementById('console-output');
+    const consoleStatus = document.getElementById('console-status');
+    const accuracySpan = document.getElementById('accuracy');
+    const trainedSpan = document.getElementById('last-trained');
+
+    function log(text, color = '#ccc') {
+        const div = document.createElement('div');
+        div.style.color = color;
+        div.innerHTML = `> [${new Date().toLocaleTimeString()}] ${text}`;
+        consoleOutput.appendChild(div);
+        consoleOutput.scrollTop = consoleOutput.scrollHeight;
+    }
+
+    document.getElementById('btn-train').addEventListener('click', async function () {
+        this.disabled = true;
+        this.innerHTML = '<span class="glow-pulse">⏳ Training...</span>';
+        consoleStatus.innerText = 'PROCESSING';
+        consoleStatus.style.color = '#f97316';
+
+        log('Initializing data extraction...', '#00ccff');
+        log('Loading samples from database...');
+
+        try {
+            const response = await fetch('{% url "core:api_train_ai" %}');
+            const data = await response.json();
+
+            if (response.ok) {
+                log('Backpropagation started...', '#f97316');
+                log(`Epochs finished. Convergence reached. Final loss: ${data.loss.toFixed(6)}`, '#00ff00');
+                log(`Engine updated with info from ${data.samples} samples.`, '#00ff00');
+
+                accuracySpan.innerText = `${((1 - data.loss) * 100).toFixed(2)}%`;
+                trainedSpan.innerText = 'Just now';
+                consoleStatus.innerText = 'HEALTHY';
+                consoleStatus.style.color = '#00ff00';
+            } else {
+                log(`Error: ${data.error}`, '#ff4444');
+                consoleStatus.innerText = 'ERROR';
+                consoleStatus.style.color = '#ff4444';
+            }
+        } catch (err) {
+            log('System fault: Connection to training engine lost.', '#ff4444');
+        }
+
+        this.disabled = false;
+        this.innerHTML = '🚀 Re-Train Neural Network';
+    });
+
+    document.getElementById('btn-generate').addEventListener('click', async function () {
+        log('Reading neural weights...', '#00ccff');
+        log('Simulating 3-day split optimization...');
+
+        try {
+            const response = await fetch('{% url "core:api_generate_plan" %}');
+            const data = await response.json();
+
+            if (response.ok) {
+                log(`Plan "${data.plan_title}" successfully constructed.`, '#00ff00');
+                log('Redirecting to planning module in 2 seconds...', '#00ff00');
+                setTimeout(() => {
+                    window.location.href = `/plans/${data.plan_id}/`;
+                }, 2000);
+            } else {
+                log(`Logic error: ${data.error}`, '#ff4444');
+            }
+        } catch (err) {
+            log('Inference engine failed.', '#ff4444');
+        }
+    });
+</script>
+
+<style>
+    #console-output::-webkit-scrollbar {
+        width: 4px;
+    }
+
+    #console-output::-webkit-scrollbar-thumb {
+        background: #333;
+    }
+</style>
+{% endblock %}
