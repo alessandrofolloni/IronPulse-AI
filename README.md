@@ -50,12 +50,35 @@ python seed.py          # Rapidly seed 60+ exercises
 python manage.py runserver
 ```
 
-## 🧪 Quality Assurance
+## 🧪 Quality Assurance & AI Training
 
-We use `pytest` to ensure structural integrity across models and views.
+We use `pytest` for structural integrity and a specialized pipeline for AI training.
+
+### PulseMind AI Training Pipeline
+Run the end-to-end training pipeline (Training, Validation, Testing, and Weight Export):
 ```bash
-PYTHONPATH=. pytest core/tests/ -c core/pytest.ini
+python train_pulse_mind.py
 ```
+
+### 🛰️ Weights & Biases (W&B) Integration
+To log extensive training metrics, convergence graphs, and model versioning to W&B:
+```bash
+python train_pulse_mind.py --wandb
+```
+
+## 🧠 Model Choice & Logic
+
+- **Architecture**: Custom Multi-Layer Perceptron (MLP) with Softmax output. 
+- **Implementation**: Written from scratch using NumPy (No high-level ML frameworks) to ensure absolute precision and customization.
+- **Loss Function**: **Cross-Entropy Loss**, ideal for multi-class exercise recommendation.
+- **Starting Point**: Inspired by localized recovery models, treating every set as a temporal data point.
+
+## 📊 External Datasets for Future Scaling
+
+Interested in pre-training? Consider these high-fidelity sources:
+1. **OpenPowerlifting**: Global strength data for 1RM baseline benchmarks.
+2. **FitRec Dataset**: Sequence models of workout intensity and heart rate.
+3. **StrongerByScience**: Scientific literature on hypertrophic volume thresholds.
 
 ## 📁 Architecture Overview
 
