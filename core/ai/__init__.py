@@ -25,10 +25,10 @@ Quick usage:
 from .engine import (
     PulseMindMLP, PulseMindResNet, PulseMindAttentionNet, PulseMindEnsemble,
     PulseMindClassifier, PulseMindRegressor, build_model,
-    FEATURE_NAMES, N_FEATURES,
 )
 from .trainer import (
     PulseMindTrainer,
+    FEATURE_NAMES, N_FEATURES,
     Adam, SGDMomentum,
     StepLR, CosineAnnealingLR,
     EarlyStopping,

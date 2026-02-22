@@ -90,8 +90,9 @@ EXERCISES = [
 ]
 
 created = 0
+updated = 0
 for name, muscle, difficulty, compound, desc in EXERCISES:
-    obj, is_new = Exercise.objects.get_or_create(
+    obj, is_new = Exercise.objects.update_or_create(
         name=name,
         defaults={
             'muscle_group': muscle,
@@ -102,5 +103,7 @@ for name, muscle, difficulty, compound, desc in EXERCISES:
     )
     if is_new:
         created += 1
+    else:
+        updated += 1
 
-print(f"✅ Seeded {created} exercises ({Exercise.objects.count()} total in DB)")
+print(f"✅ Seeded {created} new, {updated} updated ({Exercise.objects.count()} total in DB)")

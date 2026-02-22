@@ -18,8 +18,7 @@
         <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px">
             <span class="tag tag-{{ goal.status }}">{{ goal.get_status_display }}</span>
             <span style="font-size:20px">
-                {% if goal.goal_type == 'strength' %}💪{% elif goal.goal_type == 'weight_loss' %}⚖️{% elif
-                goal.goal_type == 'muscle_gain' %}💪{% elif goal.goal_type == 'endurance' %}🏃{% else %}🎯{% endif %}
+                {% if goal.goal_type == 'strength' %}💪{% elif goal.goal_type == 'weight_loss' %}⚖️{% elif goal.goal_type == 'muscle_gain' %}💪{% elif goal.goal_type == 'endurance' %}🏃{% else %}🎯{% endif %}
             </span>
         </div>
         <h3 style="font-size:16px;font-weight:700;color:var(--text-primary);margin-bottom:8px">{{ goal.title }}</h3>

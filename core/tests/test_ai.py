@@ -22,10 +22,10 @@ from core.ai.engine import (
     PulseMindClassifier, PulseMindRegressor, build_model,
     softmax, relu, leaky_relu, elu,
     LayerNorm, Dropout,
-    N_FEATURES, FEATURE_NAMES,
 )
 from core.ai.trainer import (
     PulseMindTrainer,
+    FEATURE_NAMES, N_FEATURES,
     Adam, SGDMomentum,
     StepLR, CosineAnnealingLR,
     EarlyStopping,

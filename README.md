@@ -1,265 +1,239 @@
-# ⚡ IronPulse — Elite Fitness Management Platform
+# 🏋️ IronPulse — Smart Fitness Tracker
 
-> *Train smarter. Track with precision. Optimise with AI.*
-
-IronPulse is a dark-luxury gym management web application built with **Django 4.2** and a **100% custom from-scratch neural network engine (PulseMind AI)**. Designed for serious athletes who want scientific strength tracking and AI-powered workout optimisation — zero external ML frameworks.
+**IronPulse** is a full-featured fitness tracking web app with a built-in AI engine that learns from your workout history to give you personalised recommendations.
 
 ---
 
-## ✨ Core Features
+## What You Can Do
 
-| Module | Description |
-|---|---|
-| 🏠 **Dashboard** | Activity heatmaps, rapid stat tiles, goal tracking, nutrition snapshot |
-| ⚡ **1RM Intelligence** | 7 formulas (Epley, Brzycki, Lander, Lombardi, Mayhew, O'Conner, Wathan), load tables |
-| 🏋️ **Workout Engine** | Session logging, live 1RM estimation per set, auto-PR detection |
-| 📋 **Exercise Library** | 60+ pre-seeded movements, muscle-group filtering, instant search |
-| 🏆 **PR Auto-Tracker** | Personal records updated automatically on every workout save |
-| 📏 **Biometric Tracking** | Body weight/fat trends, BMI calculator, full measurement history |
-| 🥗 **Nutrition Log** | Daily macro tracker: calories, protein, carbs, fat |
-| 🎯 **Goals** | Visual progress bars for strength, weight-loss, or custom targets |
-| 🧠 **PulseMind AI Lab** | Train, evaluate, and explain your custom neural network in the browser |
-| 📥 **CSV Export** | Full training history export for external analysis |
+### 🏠 Dashboard
+Your command centre. See at a glance:
+- Workouts in the last 30 days
+- Total volume lifted (kg)
+- Personal records
+- Active goals
+- 7-day activity chart
+- Quick links to log workouts, meals, and measurements
 
----
+### 🏋️ Workout Tracking
+Log every training session with full detail:
+- **Session name, date, notes, duration**
+- **Sets**: exercise, weight, reps — as many as you need
+- Volume and one-rep-max calculated automatically
+- Browse, edit, and delete past sessions
 
-## 🧠 PulseMind AI Engine
+### 📋 Exercise Library
+A searchable, filterable database of exercises:
+- Filter by muscle group (Chest, Back, Legs, Shoulders, etc.)
+- Search by name
+- See difficulty level, compound/isolation tag
+- Add your own custom exercises
 
-The AI component is built **entirely from scratch with NumPy** — no PyTorch, TensorFlow, or scikit-learn. This ensures full transparency and customisability.
+### 📏 Body Measurements
+Track your body composition over time:
+- Weight, body fat %, muscle mass
+- Individual measurements: chest, waist, hips, arms, thighs
+- Visual progress tracking
 
-### Architectures Available
+### 🥗 Nutrition Logging
+Simple daily nutrition tracking:
+- Calories, protein, carbs, fat
+- Per-meal logging with meal type (breakfast, lunch, dinner, snack)
+- Daily totals on the dashboard
 
-| Architecture | Key Idea | Best For |
-|---|---|---|
-| **PulseMindMLP** | Deep Multi-Layer Perceptron with He init, LayerNorm, Dropout | Fast baseline |
-| **PulseMindResNet** | Residual skip-connections (like ResNet-50) | Deep networks, default choice |
-| **PulseMindAttentionNet** | Scaled dot-product attention over input features (transformer-inspired) | Explainability, cross-feature dependencies |
-| **PulseMindEnsemble** | Soft-voting combination of MLP + ResNet | Best overall accuracy |
+### 🎯 Goals
+Set and track fitness milestones:
+- Target weight, strength, or habit goals
+- Track progress status (active, completed, paused)
+- See active goals count on dashboard
 
-### Optimisers
+### ⚡ 1RM Calculator
+Estimate your one-rep max for any exercise:
+- Uses the Epley formula
+- Enter weight and reps performed to get prediction
 
-- **Adam** (default) — Adaptive moment estimation with bias correction and L2 weight decay
-- **SGD + Momentum** — Classic with Nesterov-style momentum
+### 🧠 AI Lab — PulseMind Intelligence
+The standout feature. A fully custom neural network (built from scratch with NumPy) that:
+- **Learns from your actual workout history** to rank exercises
+- **Generates personalised workout plans** — 3-day splits based on model predictions
+- **Predicts target weights** for exercises based on your progression
+- Supports 4 architectures you can select in the UI:
+  - **Deep MLP** — fast, classic neural network
+  - **ResNet** — skip-connections for deeper learning (recommended)
+  - **AttentionNet** — transformer-inspired, shows which features matter most
+  - **Ensemble** — combines models for highest accuracy
 
-### LR Schedulers
-
-- **Cosine Annealing** — Smooth η decay from η_max → η_min over T_max epochs
-- **Step Decay** — Reduce LR by γ every N epochs
-
-### Explainability
-
-Every architecture exposes `feature_importance(X)` — gradient-based saliency (MLP/ResNet) or attention-weight scores (AttentionNet):
-
-```python
-importances = model.feature_importance(X_test)
-# → per-feature [0…1] contribution scores
-```
-
-### Features Extracted from Training Data
-
-| # | Feature | Description |
-|---|---|---|
-| 0 | `session_volume_kg` | Total kg lifted × reps |
-| 1 | `num_sets` | Total sets logged |
-| 2 | `num_exercises` | Unique exercises |
-| 3–4 | `avg_weight`, `max_weight` | Weight distribution |
-| 5–6 | `avg_reps`, `max_reps` | Volume distribution |
-| 7–8 | `avg_one_rm`, `max_one_rm` | Strength estimates |
-| 9 | `compound_ratio` | Fraction of compound movements |
-| 10–15 | Muscle group ratios | Chest/Back/Legs/Shoulders/Arms/Core |
-| 16 | `days_since_last` | Rest days between sessions |
-| 17 | `session_count_30d` | Training frequency proxy |
-
----
-
-## 🚀 Easy Training Procedure
-
-### 1. Basic Training (Best Architecture — ResNet)
-```bash
-python train_pulse_mind.py
-```
-
-### 2. Full W&B Experiment Tracking
-```bash
-wandb login                            # one-time setup
-python train_pulse_mind.py --wandb
-```
-
-### 3. Choose Architecture
-```bash
-python train_pulse_mind.py --arch mlp
-python train_pulse_mind.py --arch resnet       # ← default & recommended
-python train_pulse_mind.py --arch attention    # best for explainability
-python train_pulse_mind.py --arch ensemble     # best accuracy, slower
-```
-
-### 4. Pre-training on Synthetic Data (Warm-Start)
-```bash
-python train_pulse_mind.py --pretrain --wandb
-```
-
-### 5. Architecture Sweep (Compare All)
-```bash
-python train_pulse_mind.py --sweep
-```
-
-### 6. Strength Prediction (Regression Task)
-```bash
-python train_pulse_mind.py --task regression --arch mlp
-```
-
-### 7. Quick Smoke Test
-```bash
-python train_pulse_mind.py --quick
-```
-
-### All CLI Options
-```
---arch       mlp | resnet | attention | ensemble  (default: resnet)
---epochs     N                                    (default: 200)
---task       classification | regression          (default: classification)
---wandb      Enable Weights & Biases logging
---pretrain   Pre-train on synthetic data first
---sweep      Run all architectures, compare results
---quick      50 epochs, no W&B (for testing)
---seed       Random seed for reproducibility     (default: 42)
-```
+#### How it works (simple version):
+1. Open the **AI Lab** page
+2. Pick an architecture (ResNet is default)
+3. Click **Train PulseMind AI** — the app extracts 18 features from your workout history, trains the model, and saves the weights
+4. Click **Generate AI Workout Plan** — the model ranks exercises and creates a plan for you
+5. See **feature importances** — understand what drives the AI's recommendations
 
 ---
 
-## 🛠️ Installation & Setup
+## Getting Started
+
+### Prerequisites
+- Python 3.9+
+- pip
+
+### Installation
 
 ```bash
-# 1. Clone & enter directory
-git clone https://github.com/alessandrofolloni/GYM.git
-cd GYM
+git clone https://github.com/alessandrofolloni/IronPulse-AI.git
+cd IronPulse-AI
 
-# 2. Create virtual environment
+# Create virtual environment
 python3 -m venv venv
 source venv/bin/activate
 
-# 3. Install dependencies
-pip install -r requirements.txt
-
-# 4. Configure environment
-cp .env.example .env
-# Edit .env: set DB_ENGINE=sqlite (default) or mysql
-
-# 5. Database setup
-python manage.py makemigrations
-python manage.py migrate
-python seed.py                         # Seeds 62+ exercises
-
-# 6. Launch dev server
-python manage.py runserver
+# First-time setup (installs deps, migrates DB, seeds 60+ exercises)
+bash start.sh setup
 ```
 
-Visit [http://localhost:8000](http://localhost:8000)
-
----
-
-## 🧪 Testing
+### Running
 
 ```bash
-# Run all tests
-pytest core/tests/ -v
+# Activate venv (if not already active)
+source venv/bin/activate
 
-# Run with coverage
-pytest core/tests/ --cov=core --cov-report=term-missing
+# Start the server
+bash start.sh
 ```
 
-### W&B Setup (optional but recommended)
+Then open **http://localhost:8000** in your browser.
+
+### All Commands
+
+| Command | What it does |
+|---------|-------------|
+| `bash start.sh` | Start dev server at localhost:8000 |
+| `bash start.sh setup` | First-time setup (migrate + seed) |
+| `bash start.sh train` | Quick AI training (50 epochs) |
+| `bash start.sh train-full` | Full training (300 epochs + synthetic pre-training) |
+| `bash start.sh sweep` | Compare all 4 architectures side-by-side |
+| `bash start.sh test` | Run the test suite |
+| `bash start.sh seed` | Seed the exercise database |
+| `bash start.sh migrate` | Apply database migrations |
+
+---
+
+## Project Structure
+
+```
+IronPulse-AI/
+├── start.sh                 ← one script to run everything
+├── manage.py                ← Django management
+├── train_pulse_mind.py      ← CLI training script
+├── seed.py                  ← seeds 60+ exercises
+├── requirements.txt
+│
+├── gymapp/                  ← Django project settings
+│   ├── settings.py
+│   ├── urls.py
+│   └── wsgi.py
+│
+├── core/                    ← main application
+│   ├── models.py            ← Exercise, WorkoutSession, WorkoutPlan, etc.
+│   ├── views.py             ← all page views + API endpoints
+│   ├── urls.py              ← URL routing
+│   ├── forms.py             ← Django forms
+│   ├── ai/                  ← PulseMind AI engine
+│   │   ├── engine.py        ← neural network architectures (NumPy)
+│   │   ├── trainer.py       ← training loop, optimisers, schedulers
+│   │   └── weights/         ← saved model weights (gitignored)
+│   └── tests/
+│       └── test_ai.py       ← 40+ tests for AI engine
+│
+├── templates/core/          ← HTML templates
+│   ├── dashboard.html
+│   ├── ai_lab.html
+│   ├── exercises.html
+│   ├── workouts.html
+│   └── ...
+│
+└── static/css/              ← stylesheets
+    ├── main.css
+    └── modules/
+        ├── base.css
+        ├── components.css
+        ├── ai.css
+        └── utilities.css
+```
+
+---
+
+## Technical Details (for developers)
+
+### AI Engine Architecture
+
+The PulseMind engine is built **entirely from scratch using NumPy** — no PyTorch, no TensorFlow, no scikit-learn.
+
+| Architecture | Parameters | Key Feature |
+|---|---|---|
+| `PulseMindMLP` | He init, LayerNorm, Dropout | Fast baseline |
+| `PulseMindResNet` | Skip-connections per block | Deep without vanishing gradients |
+| `PulseMindAttentionNet` | Scaled dot-product attention | Interpretable attention weights |
+| `PulseMindEnsemble` | Soft-voting over sub-models | Highest accuracy |
+
+### 18 Input Features
+
+The model extracts these features from workout history:
+1. Session volume (kg) · 2. Total sets · 3. Unique exercises
+4. Avg weight · 5. Max weight · 6. Avg reps · 7. Max reps
+8. Avg estimated 1RM · 9. Best estimated 1RM
+10. Compound exercise ratio
+11–16. Muscle group distribution (chest, back, legs, shoulders, arms, core)
+17. Days since last session · 18. Monthly session frequency
+
+### Training Pipeline
+
+- **Optimisers**: Adam (bias-corrected, L2 decay) or SGD+Momentum
+- **LR Schedulers**: Cosine Annealing, Step Decay
+- **Early Stopping**: patience-based with best-checkpoint restoration
+- **Loss Functions**: Cross-Entropy (classification), MSE, Huber (regression)
+- **Data**: mini-batch shuffled, train/val split
+
+### Weights & Biases Integration
+
+For experiment tracking:
 ```bash
-pip install wandb
-wandb login                            # enter your API key once
-python train_pulse_mind.py --wandb --arch resnet --epochs 300
+export WANDB_API_KEY=your_key_here
+bash start.sh train-wandb
 ```
 
----
-
-## 🏗️ Project Architecture
-
-```
-GYM/
-├── gymapp/                  # Django project config
-│   ├── settings.py          # DB, static, installed apps
-│   └── urls.py              # Root URL routing
-│
-├── core/                    # Main application
-│   ├── models.py            # Data models (Exercise, Session, Set, PR, Goal…)
-│   ├── views.py             # View logic + REST API endpoints
-│   ├── urls.py              # App URL patterns
-│   ├── forms.py             # Django model forms
-│   ├── admin.py             # Admin panel config
-│   │
-│   ├── ai/                  # PulseMind AI module
-│   │   ├── engine.py        # Neural network architectures (MLP, ResNet, Attention, Ensemble)
-│   │   ├── trainer.py       # Trainer, optimisers (Adam/SGD), schedulers, data prep
-│   │   └── weights/         # Exported model weights (JSON, gitignored)
-│   │
-│   └── tests/               # Test suite
-│       ├── test_models.py   # Model unit tests
-│       ├── test_views.py    # View/API tests
-│       └── test_ai.py       # AI engine tests
-│
-├── templates/               # Django HTML templates (dark-luxury UI)
-│   ├── base.html            # Sidebar, topbar, global JS
-│   └── core/                # One template per view
-│
-├── static/css/              # IronPulse Design System
-│   ├── main.css             # Entry point (imports all modules)
-│   └── modules/
-│       ├── variables.css    # Design tokens (colours, spacing, shadows)
-│       ├── base.css         # Reset, typography, animations
-│       ├── layout.css       # Sidebar, topbar, grid system
-│       ├── components.css   # Cards, buttons, tables, tags, badges
-│       ├── forms.css        # Form inputs, validation styles
-│       ├── ai.css           # AI Lab, 1RM Calculator specific styles
-│       └── utilities.css    # Helpers, alerts, empty states
-│
-├── train_pulse_mind.py      # Easy training CLI (see above)
-├── seed.py                  # Seeds 62+ exercises into the DB
-├── requirements.txt         # Python dependencies
-└── README.md                # This file
-```
-
----
-
-## 🔬 External Datasets for Pre-training / Scaling
-
-| Dataset | Use Case |
-|---|---|
-| [OpenPowerlifting](https://openpowerlifting.org/data) | Global 1RM baseline benchmarks |
-| [FitRec](https://github.com/houyunxiang33/fitrec-project) | Workout intensity & heart rate sequences |
-| [NHANES](https://www.cdc.gov/nchs/nhanes/) | Body composition population norms |
-
----
-
-## 🌐 Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Backend | Django 4.2 (Python 3.9+) |
-| Database | SQLite (dev) / MySQL (prod) |
-| Frontend | Vanilla CSS Design System, Chart.js 4.4 |
-| AI Engine | NumPy-only (from scratch) |
-| Experiment Tracking | Weights & Biases (W&B) |
-| Testing | pytest + pytest-django |
-
----
-
-## 📡 API Endpoints
+### API Endpoints
 
 | Method | URL | Description |
-|---|---|---|
-| GET | `/api/1rm/` | Calculate 1RM (all formulas) |
-| GET | `/api/train-ai/` | Trigger in-browser AI training |
-| GET | `/api/generate-plan/` | Generate AI workout plan |
-| GET | `/api/predict/<exercise_id>/` | Predict next-session weight (regression) |
-| GET | `/api/exercise-history/<id>/` | Full training history for an exercise |
-| GET | `/api/dashboard-stats/` | Activity stats for dashboard charts |
-| GET | `/export/workouts/csv/` | Export all workouts as CSV |
+|--------|-----|-------------|
+| GET | `/api/train/` | Train the AI model |
+| GET | `/api/generate-plan/` | Generate workout plan from trained model |
+| GET | `/api/predict-strength/` | Predict target weight for an exercise |
+
+### Running Tests
+
+```bash
+bash start.sh test
+```
+
+Covers: all 4 architectures, forward/backward pass shapes, serialisation round-trips, loss functions, optimisers, LR schedulers, early stopping, feature importance, and trainer integration.
 
 ---
 
-*Built with precision. Powered by PulseMind AI. **IronPulse.***
+## Dependencies
+
+- Django 4.2
+- NumPy (< 2.0)
+- wandb (optional, for experiment tracking)
+- crispy-forms (form styling)
+
+---
+
+## License
+
+MIT
+
+---
+
+Built with 🧡 by Alessandro Folloni

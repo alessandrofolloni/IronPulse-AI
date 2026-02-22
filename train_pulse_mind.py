@@ -47,8 +47,8 @@ import django
 django.setup()
 
 from core.models import WorkoutSession, Exercise, AIModelMetadata
-from core.ai.engine import build_model, FEATURE_NAMES, N_FEATURES
-from core.ai.trainer import PulseMindTrainer, prepare_workout_data, prepare_regression_data
+from core.ai.engine import build_model
+from core.ai.trainer import PulseMindTrainer, prepare_workout_data, prepare_regression_data, FEATURE_NAMES, N_FEATURES
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
