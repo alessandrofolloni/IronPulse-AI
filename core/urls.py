@@ -31,4 +31,5 @@ urlpatterns = [
     path('api/dashboard-stats/', views.api_dashboard_stats, name='api_dashboard_stats'),
     path('api/ai/train/', views.api_train_ai, name='api_train_ai'),
     path('api/ai/generate-plan/', views.api_generate_plan, name='api_generate_plan'),
+    path('api/ai/predict-strength/<int:exercise_id>/', views.api_predict_strength, name='api_predict_strength'),
 ]

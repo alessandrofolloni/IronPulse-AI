@@ -38,3 +38,10 @@ db.sqlite3
 .vscode/
 *.swp
 *.swo
+
+# AI weights (large JSON files — use W&B for model versioning)
+core/ai/weights/
+!core/ai/weights/.gitkeep
+
+# Weights & Biases
+wandb/

@@ -21,16 +21,61 @@ body {
     overflow-x: hidden;
 }
 
+/* ── Section headers ──────────────────────────────────────────── */
 .section-title {
     font-family: 'Outfit', sans-serif;
-    font-size: 22px;
+    font-size: 24px;
     font-weight: 700;
     color: var(--text-primary);
     margin-bottom: 4px;
+    letter-spacing: -0.02em;
 }
 
 .section-subtitle {
     font-size: 14px;
     color: var(--text-secondary);
     margin-bottom: 28px;
+    line-height: 1.6;
+}
+
+/* ── Page transition ──────────────────────────────────────────── */
+.fade-in {
+    animation: fadeInUp .35s ease both;
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ── Scrollbar ────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, .08);
+    border-radius: 6px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, .15);
+}
+
+/* ── Selection colour ─────────────────────────────────────────── */
+::selection {
+    background: var(--accent-glow);
+    color: var(--text-primary);
 }
