@@ -3,122 +3,120 @@
 #  IronPulse — One Script To Rule Them All
 # ═══════════════════════════════════════════════════════════════
 #
-#  bash start.sh           → start dev server  (auto-migrates first)
-#  bash start.sh train     → quick AI training  (50 epochs)
-#  bash start.sh train-full→ full training      (300 epochs + pretrain)
-#  bash start.sh sweep     → compare all 4 architectures
-#  bash start.sh test      → run test suite
-#  bash start.sh seed      → seed exercises
-#  bash start.sh setup     → first-time: migrate + seed
+#  bash start.sh              → start dev server (auto-migrates)
+#  bash start.sh setup        → first-time: migrate + seed + import exercises
+#  bash start.sh import       → import 500+ real exercises from WGER
+#  bash start.sh train        → quick AI training (200 epochs, adversarial)
+#  bash start.sh train-full   → full training (400 epochs)
+#  bash start.sh train-wandb  → training with W&B logging
+#  bash start.sh sweep        → compare all 4 architectures
+#  bash start.sh test         → run pytest suite
+#  bash start.sh deps         → install all Python dependencies
 #
 # ═══════════════════════════════════════════════════════════════
 
 set -e
-REPO="$(cd "$(dirname "$0")" && pwd)"
 
-# ── Find Python ───────────────────────────────────────────────
-for p in "$REPO/venv/bin/python3" "$REPO/venv/bin/python"; do
-  [ -x "$p" ] && PYTHON="$p" && break
-done
-[ -z "$PYTHON" ] && [ -n "$VIRTUAL_ENV" ] && PYTHON="$(command -v python3 2>/dev/null || command -v python 2>/dev/null)"
-[ -z "$PYTHON" ] && PYTHON="$(command -v python3 2>/dev/null)"
-[ -z "$PYTHON" ] && { echo "❌ Python not found. Run:  source venv/bin/activate"; exit 1; }
+PYTHON=${PYTHON:-python3}
+MANAGE="$PYTHON manage.py"
 
-echo "🐍  $($PYTHON --version 2>&1)"
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 
-# ── Helpers ───────────────────────────────────────────────────
-header() { echo ""; echo "═══════════════════════════════════════"; echo "  ⚡ IronPulse — $1"; echo "═══════════════════════════════════════"; }
+step() { echo -e "${CYAN}▶ $1${NC}"; }
+ok()   { echo -e "${GREEN}✅ $1${NC}"; }
+warn() { echo -e "${YELLOW}⚠  $1${NC}"; }
+err()  { echo -e "${RED}❌ $1${NC}"; exit 1; }
 
-ensure_deps() {
-  "$PYTHON" -m pip install -q -r "$REPO/requirements.txt" 2>&1 | grep -vE "already satisfied|WARNING|notice|DEPRECATION" || true
-  # Auto-fix broken numpy (common on macOS mixed-arch setups)
-  "$PYTHON" -c "import numpy" 2>/dev/null || {
-    echo "⚠️  Fixing numpy…"
-    "$PYTHON" -m pip install --force-reinstall "numpy>=1.24,<2.0" -q 2>&1 | tail -2
-  }
+CMD="${1:-serve}"
+
+# ── Dependencies ─────────────────────────────────────────────
+install_deps() {
+    step "Installing Python dependencies..."
+    pip install -r requirements.txt
+    ok "Dependencies installed"
 }
 
-auto_migrate() {
-  echo "⚙️   Checking database…"
-  "$PYTHON" "$REPO/manage.py" migrate --run-syncdb 2>&1 | grep -vE "^  Applying|^Operations|^Running" | head -5 || true
+# ── Migrate ──────────────────────────────────────────────────
+migrate() {
+    step "Running migrations..."
+    $MANAGE migrate --no-input
+    ok "Database up to date"
 }
 
-# ── Route ─────────────────────────────────────────────────────
-MODE="${1:-server}"
+# ── Seed exercises (fallback if WGER import wasn't run) ──────
+seed() {
+    step "Seeding base exercises..."
+    $MANAGE loaddata core/fixtures/exercises.json 2>/dev/null || \
+        $PYTHON seed.py 2>/dev/null || \
+        warn "No seed file found — run 'bash start.sh import' to get real exercises"
+}
 
-case "$MODE" in
+# ── Import real exercises from WGER ─────────────────────────
+import_exercises() {
+    step "Importing exercises from WGER open-source database..."
+    $MANAGE import_wger --max 500
+    ok "Exercise library imported"
+}
 
-  server|"")
-    header "Starting Dev Server"
-    ensure_deps
-    auto_migrate
-    echo ""
-    echo "🌐  http://localhost:8000"
-    echo "    Ctrl+C to stop"
-    echo ""
-    "$PYTHON" "$REPO/manage.py" runserver
-    ;;
+# ── AI Training ──────────────────────────────────────────────
+train() {
+    local epochs="${1:-200}"
+    local wandb="${2:-false}"
+    step "Training PulseMind AI (${epochs} epochs, adversarial=true, mixup=true)..."
+    $PYTHON train_pulse_mind.py --arch resnet --epochs "$epochs" \
+        $([ "$wandb" = "true" ] && echo "--wandb") \
+        --adversarial --mixup
+    ok "Training complete"
+}
 
-  train)
-    header "Quick AI Training (50 epochs)"
-    ensure_deps
-    auto_migrate
-    "$PYTHON" "$REPO/train_pulse_mind.py" --quick
-    ;;
+sweep() {
+    step "Architecture sweep: MLP vs ResNet vs AttentionNet vs Ensemble..."
+    for arch in mlp resnet attention ensemble; do
+        echo -e "\n${YELLOW}── $arch ──${NC}"
+        $PYTHON train_pulse_mind.py --arch "$arch" --epochs 100 --adversarial --mixup
+    done
+    ok "Sweep complete"
+}
 
-  train-full)
-    header "Full AI Training (300 epochs + pretrain)"
-    ensure_deps
-    auto_migrate
-    "$PYTHON" "$REPO/train_pulse_mind.py" --arch resnet --epochs 300 --pretrain
-    ;;
-
-  train-wandb)
-    header "Training with W&B"
-    ensure_deps
-    auto_migrate
-    "$PYTHON" "$REPO/train_pulse_mind.py" --arch resnet --epochs 300 --pretrain --wandb
-    ;;
-
-  sweep)
-    header "Architecture Sweep"
-    ensure_deps
-    auto_migrate
-    "$PYTHON" "$REPO/train_pulse_mind.py" --sweep --epochs 80
-    ;;
-
-  test)
-    header "Test Suite"
-    ensure_deps
-    "$PYTHON" -m pip install -q pytest pytest-django 2>/dev/null || true
-    "$PYTHON" -m pytest "$REPO/core/tests/" -v --tb=short
-    ;;
-
-  seed)
-    header "Seeding Database"
-    auto_migrate
-    "$PYTHON" "$REPO/seed.py"
-    echo "✅  Done"
-    ;;
-
-  migrate)
-    header "Migrations"
-    "$PYTHON" "$REPO/manage.py" makemigrations
-    "$PYTHON" "$REPO/manage.py" migrate
-    echo "✅  Done"
-    ;;
-
-  setup)
-    header "First-Time Setup"
-    ensure_deps
-    "$PYTHON" "$REPO/manage.py" migrate
-    "$PYTHON" "$REPO/seed.py"
-    echo ""
-    echo "✅  Ready! Run:  bash start.sh"
-    ;;
-
-  *)
-    echo "Usage: bash start.sh [server|train|train-full|sweep|test|seed|setup]"
-    exit 1
-    ;;
+# ── Main ─────────────────────────────────────────────────────
+case "$CMD" in
+    serve|"")
+        migrate
+        step "Starting dev server → http://localhost:8000"
+        $MANAGE runserver
+        ;;
+    setup)
+        install_deps
+        migrate
+        import_exercises
+        ok "Setup complete! Run 'bash start.sh' to start."
+        ;;
+    import)
+        import_exercises
+        ;;
+    deps)
+        install_deps
+        ;;
+    train)
+        train 200 false
+        ;;
+    train-full)
+        train 400 false
+        ;;
+    train-wandb)
+        train 300 true
+        ;;
+    sweep)
+        sweep
+        ;;
+    test)
+        step "Running test suite..."
+        pytest core/tests/ -v --tb=short
+        ;;
+    migrate)
+        migrate
+        ;;
+    *)
+        err "Unknown command: $CMD. Valid: serve, setup, import, train, train-full, train-wandb, sweep, test, deps"
+        ;;
 esac

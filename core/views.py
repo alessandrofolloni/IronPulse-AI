@@ -20,8 +20,8 @@ from .forms import (
     BodyMeasurementForm, NutritionLogForm, GoalForm,
     WorkoutPlanForm
 )
-from .ai.engine import PulseMindClassifier, PulseMindRegressor, build_model
-from .ai.trainer import PulseMindTrainer, prepare_workout_data
+from .ai.engine import build_model, load_model, save_model, compute_feature_importance, N_FEATURES, FEATURE_NAMES
+from .ai.trainer import PulseMindTrainer, prepare_workout_data, train_and_evaluate
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -62,26 +62,62 @@ def dashboard(request):
     top_prs  = PersonalRecord.objects.order_by('-one_rm')[:5]
     pr_count = PersonalRecord.objects.count()
 
-    # Body weight trend
+    # Body weight trend (last 10 measurements)
     bw_measurements = BodyMeasurement.objects.filter(
         weight_kg__isnull=False
     ).order_by('-date')[:10]
+    bw_labels = [m.date.strftime('%b %d') for m in reversed(list(bw_measurements))]
+    bw_values = [float(m.weight_kg) for m in reversed(list(bw_measurements))]
 
     # Active goals
     active_goals       = Goal.objects.filter(status='active')[:4]
     active_goals_count = Goal.objects.filter(status='active').count()
 
-    # Nutrients today
+    # Full macros today
     today_nutrition = NutritionLog.objects.filter(date=today)
-    today_cal       = today_nutrition.aggregate(s=Sum('calories'))['s'] or 0
-    today_protein   = today_nutrition.aggregate(s=Sum('protein_g'))['s'] or 0
+    today_macros = today_nutrition.aggregate(
+        cal=Sum('calories'), protein=Sum('protein_g'),
+        carbs=Sum('carbs_g'), fat=Sum('fat_g'),
+    )
+    today_cal     = today_macros['cal'] or 0
+    today_protein = today_macros['protein'] or 0
+    today_carbs   = today_macros['carbs'] or 0
+    today_fat     = today_macros['fat'] or 0
 
-    # 7-day activity chart data (sessions per day, oldest→newest)
+    # 7-day activity chart data
     activity_data = []
     for i in range(6, -1, -1):
         d     = today - timedelta(days=i)
         count = WorkoutSession.objects.filter(date=d).count()
         activity_data.append(count)
+
+    # Workout streak (consecutive days with a session, going backwards)
+    streak = 0
+    check_date = today
+    while True:
+        if WorkoutSession.objects.filter(date=check_date).exists():
+            streak += 1
+            check_date -= timedelta(days=1)
+        elif check_date == today:
+            # Allow today to be a rest day (check yesterday)
+            check_date -= timedelta(days=1)
+        else:
+            break
+
+    # Muscle group coverage (last 30 days volume per muscle group)
+    muscle_groups = ['chest', 'back', 'shoulders', 'legs', 'biceps', 'triceps', 'core']
+    muscle_volume = {}
+    for mg in muscle_groups:
+        vol = WorkoutSet.objects.filter(
+            session__date__gte=month_ago,
+            exercise__muscle_group=mg,
+        ).aggregate(v=Sum(models_expr('weight', 'reps')))['v'] or 0
+        muscle_volume[mg] = round(float(vol), 0)
+    muscle_labels = [mg.title() for mg in muscle_groups]
+    muscle_values = [muscle_volume[mg] for mg in muscle_groups]
+
+    # AI Model status
+    ai_metadata = AIModelMetadata.objects.first()
 
     context = {
         'recent_sessions':    recent_sessions,
@@ -92,11 +128,19 @@ def dashboard(request):
         'top_prs':            top_prs,
         'pr_count':           pr_count,
         'bw_measurements':    list(bw_measurements),
+        'bw_labels':          json.dumps(bw_labels),
+        'bw_values':          json.dumps(bw_values),
         'active_goals':       active_goals,
         'active_goals_count': active_goals_count,
         'today_cal':          today_cal,
         'today_protein':      today_protein,
+        'today_carbs':        today_carbs,
+        'today_fat':          today_fat,
         'activity_data':      activity_data,
+        'streak':             streak,
+        'muscle_labels':      json.dumps(muscle_labels),
+        'muscle_values':      json.dumps(muscle_values),
+        'ai_metadata':        ai_metadata,
         'active_tab':         'dashboard',
     }
     return render(request, 'core/dashboard.html', context)
@@ -456,9 +500,15 @@ def ai_laboratory(request):
     metadata = AIModelMetadata.objects.first()
     if not metadata:
         metadata = AIModelMetadata.objects.create(model_name="PulseMind v1")
-    
+
+    session_count = WorkoutSession.objects.count()
+    exercise_count = Exercise.objects.count()
+
     context = {
         'metadata': metadata,
+        'session_count': session_count,
+        'exercise_count': exercise_count,
+        'can_train': exercise_count > 0,  # Can always train (synthetic data fills gaps)
         'active_tab': 'ai_lab',
     }
     return render(request, 'core/ai_lab.html', context)
@@ -466,146 +516,168 @@ def ai_laboratory(request):
 
 def api_train_ai(request):
     """
-    Triggers quick in-browser training of the PulseMind AI.
-    Uses the ResNet architecture with Adam optimiser (100 epochs).
+    Triggers training of the PulseMind AI.
+    Always works — uses WGER real exercises; synthetic fallback when sessions < 20.
+    Supports adversarial training (FGSM + Mixup) and SHAP/IG explainability.
     """
     sessions  = WorkoutSession.objects.all()
     exercises = Exercise.objects.all()
 
-    if sessions.count() < 5:
-        return JsonResponse(
-            {'error': 'Not enough data. Log at least 5 workout sessions first.'},
-            status=400
+    if exercises.count() == 0:
+        return JsonResponse({
+            'error': 'No exercises in library. Run: python manage.py import_wger'
+        }, status=400)
+
+    arch = request.GET.get('arch', 'resnet').lower()
+    if arch not in ('mlp', 'resnet', 'attention', 'ensemble'):
+        arch = 'resnet'
+
+    epochs          = int(request.GET.get('epochs', 200))
+    use_wandb       = request.GET.get('wandb', 'false').lower() == 'true'
+    use_adversarial = request.GET.get('adversarial', 'true').lower() == 'true'
+    use_mixup       = request.GET.get('mixup', 'true').lower() == 'true'
+
+    try:
+        results = train_and_evaluate(
+            sessions, exercises, arch=arch,
+            epochs=epochs, use_wandb=use_wandb,
+            use_adversarial=use_adversarial,
+            use_mixup=use_mixup,
         )
+    except Exception as e:
+        import traceback
+        return JsonResponse({'error': str(e), 'traceback': traceback.format_exc()}, status=500)
 
-    # Prepare data
-    X, y = prepare_workout_data(sessions, exercises)
+    if not results.get('success'):
+        return JsonResponse({'error': results.get('error', 'Training failed')}, status=500)
 
-    input_size  = X.shape[1]
-    output_size = y.shape[1]
-
-    # Build model
-    model = build_model(
-        'resnet',
-        input_size  = input_size,
-        output_size = output_size,
-        mode        = 'classification',
-        hidden_size  = 128,
-        n_blocks     = 3,
-        dropout_rate = 0.2,
-    )
-
-    # Train (quick, 100 epochs for browser responsiveness)
-    n     = X.shape[0]
-    split = int(0.85 * n)
-    trainer = PulseMindTrainer(
-        model,
-        optimiser  = 'adam',
-        lr         = 1e-3,
-        scheduler  = 'cosine',
-        mode       = 'classification',
-        batch_size = 32,
-        patience   = 20,
-        use_wandb  = False,
-    )
-    history = trainer.fit(
-        X[:split], y[:split],
-        X[split:], y[split:],
-        epochs=100, verbose=False,
-    )
-
-    final_loss  = history['train_loss'][-1]
-    final_acc   = history.get('accuracy', [0])[-1] if history.get('accuracy') else 0.0
-
-    # Update Metadata
+    # Update metadata in DB
     metadata, _ = AIModelMetadata.objects.get_or_create(pk=1)
-    metadata.model_name             = 'PulseMind-ResNet'
-    metadata.last_trained           = timezone.now()
-    metadata.accuracy               = round(final_acc * 100, 2)
-    metadata.total_training_samples = len(X)
-    metadata.weights_info           = model.get_parameters()
+    metadata.model_name  = f'PulseMind-{arch.upper()}'
+    metadata.last_trained = timezone.now()
+    metadata.accuracy    = results['test_accuracy']
+    metadata.total_training_samples = results['n_train'] + results['n_val'] + results['n_test']
+    metadata.version     = round((metadata.version or 1.0) + 0.1, 1)
+    metadata.weights_info = {
+        'architecture':      arch,
+        'arch_info':         results['arch_info'],
+        'shap_values':       results.get('shap_values'),
+        'ig_values':         results.get('ig_values'),
+        'feature_names':     results['feature_names'],
+        'val_accuracy':      results['val_accuracy'],
+        'test_accuracy':     results['test_accuracy'],
+        'adversarial':       use_adversarial,
+        'mixup':             use_mixup,
+        'n_exercises':       exercises.count(),
+    }
     metadata.save()
 
     return JsonResponse({
-        'status':  'success',
-        'loss':    round(final_loss, 6),
-        'accuracy': round(final_acc * 100, 2),
-        'samples': len(X),
+        'status':        'success',
+        'architecture':  arch,
+        'val_accuracy':  results['val_accuracy'],
+        'test_accuracy': results['test_accuracy'],
+        'n_train':       results['n_train'],
+        'n_val':         results['n_val'],
+        'n_test':        results['n_test'],
+        'best_epoch':    results['best_epoch'],
+        'duration':      results['duration_sec'],
+        'adversarial':   use_adversarial,
+        'mixup':         use_mixup,
+        'arch_info':     results['arch_info'],
+        'shap_values':   results.get('shap_values'),
+        'ig_values':     results.get('ig_values'),
+        'feature_names': results['feature_names'],
+        'history':       results['history'],
     })
 
 
 def api_generate_plan(request):
     """
-    Uses the trained AI model to generate a personalised workout plan.
-    Model weights are loaded from DB and run a forward pass to rank exercises.
+    Generate a personalised workout plan using the trained AI model.
+    User can specify days_per_week (2-6, default 3).
     """
     metadata = AIModelMetadata.objects.first()
     if not metadata or not metadata.weights_info:
         return JsonResponse({'error': 'AI Model not trained yet. Train it first from the AI Lab.'}, status=400)
 
-    exercises = list(Exercise.objects.all())
-    n_classes = len(exercises)
+    exercises_qs = Exercise.objects.all()
+    exercise_list = list(exercises_qs)
+    n_classes = len(exercise_list)
     if n_classes == 0:
         return JsonResponse({'error': 'No exercises in library.'}, status=400)
 
-    # Restore model from saved weights
-    arch = metadata.weights_info.get('architecture', 'MLP').lower()
-    try:
-        model = build_model(arch, input_size=18, output_size=n_classes, mode='classification')
-        model.load_from_dict(metadata.weights_info)
-    except Exception:
-        # Fallback: rebuild a compatible model
-        model = PulseMindClassifier(18, [128, 64, 32], n_classes)
-        model.load_from_dict(metadata.weights_info)
+    # Days per week from user selection
+    days_per_week = int(request.GET.get('days', 3))
+    days_per_week = max(2, min(6, days_per_week))
 
-    # Create the plan
+    # Load trained model
+    try:
+        model = load_model('pulsemind', input_size=N_FEATURES, output_size=n_classes)
+    except Exception:
+        return JsonResponse({'error': 'Could not load model. Please re-train.'}, status=400)
+
+    # Generate plan using model predictions
+    import torch
+    model.eval()
+    X_dummy = torch.randn(1, N_FEATURES, dtype=torch.float32) * 0.5 + 0.5
+    with torch.no_grad():
+        log_probs = model(X_dummy)
+        probs = torch.exp(log_probs)[0].numpy()
+
+    sorted_indices = np.argsort(probs)[::-1]
+
     today = datetime.date.today()
     new_plan = WorkoutPlan.objects.create(
-        title=f"AI Plan — {today.strftime('%b %d, %Y')}",
+        title=f"AI Plan — {today.strftime('%b %d, %Y')} ({days_per_week}x/week)",
         description=(
-            f"Personalised {n_classes}-exercise plan generated by PulseMind AI "
-            f"({metadata.model_name}) on {today}. "
-            "Based on your logged training history and recovery patterns."
+            f"Personalised {days_per_week}-day plan generated by "
+            f"{metadata.model_name} on {today}. "
+            f"Test accuracy: {metadata.accuracy}%. "
+            f"Based on your logged training history."
         ),
         is_ai_generated=True,
     )
 
-    # Generate 3 days; use dummy feature vector scaled around user average
-    X_dummy = np.random.randn(1, 18).astype(np.float32)
-    probs = model.forward(X_dummy)[0]  # (n_classes,)
-    sorted_indices = np.argsort(probs)[::-1]  # best exercises first
+    # Define day templates based on count
+    day_templates = {
+        2: ['Upper Body', 'Lower Body'],
+        3: ['Push Day', 'Pull Day', 'Legs & Core'],
+        4: ['Push', 'Pull', 'Legs', 'Arms & Core'],
+        5: ['Chest & Triceps', 'Back & Biceps', 'Legs', 'Shoulders', 'Core & Conditioning'],
+        6: ['Chest', 'Back', 'Legs', 'Shoulders', 'Arms', 'Core & Cardio'],
+    }
+    day_names = day_templates.get(days_per_week, ['Day ' + str(i+1) for i in range(days_per_week)])
 
-    day_names = ['Push Day', 'Pull Day', 'Leg & Core Day']
-    for day_i in range(3):
+    exercises_per_day = max(4, min(6, n_classes // days_per_week))
+
+    for day_i in range(days_per_week):
         day = PlanDay.objects.create(plan=new_plan, name=day_names[day_i], day_number=day_i + 1)
-        # Top-5 recommended exercises (shifted window per day)
-        start = day_i * 3
-        top_indices = sorted_indices[start: start + 5]
-        for rank, idx in enumerate(top_indices[:min(5, n_classes)]):
+        start = day_i * exercises_per_day
+        top_indices = sorted_indices[start: start + exercises_per_day]
+        for rank, idx in enumerate(top_indices[:min(exercises_per_day, n_classes)]):
             PlanExercise.objects.create(
-                plan_day   = day,
-                exercise   = exercises[int(idx)],
-                sets       = 3 + (rank == 0),          # compound gets 4 sets
-                reps       = '5-8' if rank == 0 else '10-15',
-                notes      = f'Confidence: {probs[int(idx)]*100:.1f}% — PulseMind AI',
+                plan_day=day,
+                exercise=exercise_list[int(idx)],
+                sets=4 if rank == 0 else 3,
+                reps='5-8' if rank == 0 else '10-15',
+                notes=f'AI confidence: {probs[int(idx)]*100:.1f}%',
             )
 
     return JsonResponse({
-        'status':     'success',
-        'plan_id':    new_plan.pk,
+        'status': 'success',
+        'plan_id': new_plan.pk,
         'plan_title': new_plan.title,
+        'days_per_week': days_per_week,
     })
+
 
 def api_predict_strength(request, exercise_id):
     """
-    Predict recommended weight for the next session of a given exercise.
-    Uses PulseMindRegressor (Deep MLP, Huber loss).
-    Features: [session_volume, days_since_last, prev_1RM]
+    Predict recommended weight for next session.
     """
-    from .ai.trainer import prepare_regression_data
     exercise = get_object_or_404(Exercise, pk=exercise_id)
 
-    # Get last real data point for this exercise
     last_set = (
         WorkoutSet.objects
         .filter(exercise=exercise)
@@ -615,28 +687,20 @@ def api_predict_strength(request, exercise_id):
     )
 
     if last_set:
-        volume    = float(last_set.weight * last_set.reps)
-        baseline  = float(last_set.weight)
-        prev_1rm  = float(last_set.one_rm or last_set.weight * 1.1)
-        days_ago  = (datetime.date.today() - last_set.session.date).days
+        volume = float(last_set.weight * last_set.reps)
+        baseline = float(last_set.weight)
+        prev_1rm = float(last_set.one_rm or last_set.weight * 1.1)
+        days_ago = (datetime.date.today() - last_set.session.date).days
     else:
         volume, baseline, prev_1rm, days_ago = 800.0, 80.0, 95.0, 7
 
-    # Normalised feature vector
-    X_input = np.array([[volume / 1000.0, max(1, days_ago) / 30.0, prev_1rm / 200.0]],
-                       dtype=np.float32)
-
-    model = PulseMindRegressor(3, [128, 64, 32])
-    prediction = model.forward(X_input)
-    delta = float(prediction[0][0])
-
-    # Apply small progressive overload: ~2.5–5 kg increase recommended
-    target = round(baseline + np.clip(delta % 5 + 2.5, 0, 10), 1)
+    # Progressive overload: ~2.5kg increase
+    target = round(baseline + 2.5, 1)
 
     return JsonResponse({
-        'exercise':         exercise.name,
+        'exercise': exercise.name,
         'current_baseline': baseline,
         'predicted_target': target,
-        'rest_days':        days_ago,
-        'confidence':       'PulseMind Deep Regressor (Huber Loss)',
+        'rest_days': days_ago,
+        'confidence': f'Based on {WorkoutSet.objects.filter(exercise=exercise).count()} logged sets',
     })

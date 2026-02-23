@@ -2,161 +2,289 @@
 {% load static %}
 
 {% block title %}Dashboard{% endblock %}
-{% block page_title %}🛡️ Command Center{% endblock %}
+{% block page_title %}Command Center{% endblock %}
 
 {% block content %}
-<!-- Top Stats Row -->
-<div class="stats-grid"
-    style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px;margin-bottom:32px">
-    <div class="card stat-card" style="border-left:4px solid var(--accent)">
-        <div
-            style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">
-            Last 30 Days</div>
-        <div style="font-size:32px;font-weight:800;color:var(--text-primary)">{{ month_sessions }}</div>
-        <div style="font-size:14px;color:var(--text-secondary)">Workout Sessions</div>
+
+<!-- ── Hero Stats ──────────────────────────────────────────── -->
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:28px">
+    <div class="card" style="border-left:4px solid var(--accent);padding:20px">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">This Week</div>
+        <div style="font-size:36px;font-weight:800;color:var(--text-primary);line-height:1">{{ workouts_this_week }}</div>
+        <div style="font-size:13px;color:var(--text-secondary);margin-top:4px">workouts</div>
     </div>
-    <div class="card stat-card" style="border-left:4px solid #6366f1">
-        <div
-            style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">
-            Estimated Volume</div>
-        <div style="font-size:32px;font-weight:800;color:var(--text-primary)">{{ total_volume|default:0 }}</div>
-        <div style="font-size:14px;color:var(--text-secondary)">Total kg Lifted</div>
+    <div class="card" style="border-left:4px solid #6366f1;padding:20px">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Volume (30d)</div>
+        <div style="font-size:36px;font-weight:800;color:var(--text-primary);line-height:1">{{ total_volume|floatformat:0 }}</div>
+        <div style="font-size:13px;color:var(--text-secondary);margin-top:4px">kg lifted</div>
     </div>
-    <div class="card stat-card" style="border-left:4px solid #4ade80">
-        <div
-            style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">
-            Personal Records</div>
-        <div style="font-size:32px;font-weight:800;color:var(--text-primary)">{{ pr_count }}</div>
-        <div style="font-size:14px;color:var(--text-secondary)">New PRs Set</div>
+    <div class="card" style="border-left:4px solid #4ade80;padding:20px">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Streak</div>
+        <div style="font-size:36px;font-weight:800;color:var(--text-primary);line-height:1">{{ streak }}<span style="font-size:16px;color:var(--text-muted)"> days</span></div>
+        <div style="font-size:13px;color:var(--text-secondary);margin-top:4px">{% if streak > 0 %}Keep it going!{% else %}Start today{% endif %}</div>
     </div>
-    <div class="card stat-card" style="border-left:4px solid #facc15">
-        <div
-            style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">
-            Active Goals</div>
-        <div style="font-size:32px;font-weight:800;color:var(--text-primary)">{{ active_goals_count }}</div>
-        <div style="font-size:14px;color:var(--text-secondary)">Ongoing Milestones</div>
+    <div class="card" style="border-left:4px solid #facc15;padding:20px">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Personal Records</div>
+        <div style="font-size:36px;font-weight:800;color:var(--text-primary);line-height:1">{{ pr_count }}</div>
+        <div style="font-size:13px;color:var(--text-secondary);margin-top:4px">PRs set</div>
     </div>
 </div>
 
-<div class="grid-2">
-    <!-- Training Activity -->
+<!-- ── Row 2: Activity + Muscle Coverage ──────────────────── -->
+<div class="grid-2" style="margin-bottom:24px">
+    <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <h3 style="font-size:16px;font-weight:700">Weekly Activity</h3>
+            <span style="font-size:12px;color:var(--text-muted)">Last 7 days</span>
+        </div>
+        <div style="height:200px"><canvas id="activityChart"></canvas></div>
+    </div>
+    <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <h3 style="font-size:16px;font-weight:700">Muscle Coverage</h3>
+            <span style="font-size:12px;color:var(--text-muted)">30-day volume</span>
+        </div>
+        <div style="height:200px"><canvas id="muscleChart"></canvas></div>
+    </div>
+</div>
+
+<!-- ── Row 3: Today's Nutrition + Body Weight ─────────────── -->
+<div class="grid-2" style="margin-bottom:24px">
     <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-            <h3 style="font-size:18px">Activity Analysis</h3>
-            <span style="font-size:12px;color:var(--text-muted)">Weekly Consistency</span>
+            <h3 style="font-size:16px;font-weight:700">Today's Nutrition</h3>
+            <a href="{% url 'core:add_nutrition' %}" style="font-size:12px;color:var(--accent);text-decoration:none">+ Log Meal</a>
         </div>
-        <div style="height:240px">
-            <canvas id="activityChart"></canvas>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;text-align:center">
+            <div>
+                <div style="font-size:28px;font-weight:800;color:var(--accent-light)">{{ today_cal }}</div>
+                <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">kcal</div>
+            </div>
+            <div>
+                <div style="font-size:28px;font-weight:800;color:#ef4444">{{ today_protein }}g</div>
+                <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">protein</div>
+            </div>
+            <div>
+                <div style="font-size:28px;font-weight:800;color:#6366f1">{{ today_carbs }}g</div>
+                <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">carbs</div>
+            </div>
+            <div>
+                <div style="font-size:28px;font-weight:800;color:#facc15">{{ today_fat }}g</div>
+                <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">fat</div>
+            </div>
         </div>
+        {% if today_cal == 0 %}<p style="text-align:center;color:var(--text-muted);font-size:13px;margin-top:16px">No meals logged today</p>{% endif %}
     </div>
 
+    <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <h3 style="font-size:16px;font-weight:700">Body Weight</h3>
+            <a href="{% url 'core:add_measurement' %}" style="font-size:12px;color:var(--accent);text-decoration:none">+ Measure</a>
+        </div>
+        {% if bw_values != "[]" %}
+        <div style="height:160px"><canvas id="bwChart"></canvas></div>
+        {% else %}
+        <div style="display:flex;align-items:center;justify-content:center;height:160px;color:var(--text-muted);font-size:13px">No measurements yet</div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- ── Row 4: Recent Sessions + Goals + AI ────────────────── -->
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:24px">
     <!-- Recent Sessions -->
     <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-            <h3 style="font-size:18px">Recent Intelligence</h3>
-            <a href="{% url 'core:workouts' %}" style="font-size:12px;color:var(--accent);text-decoration:none">View
-                All</a>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <h3 style="font-size:16px;font-weight:700">Recent Workouts</h3>
+            <a href="{% url 'core:workouts' %}" style="font-size:12px;color:var(--accent);text-decoration:none">View All</a>
         </div>
         {% if recent_sessions %}
-        <div style="display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;flex-direction:column;gap:8px">
             {% for s in recent_sessions %}
-            <a href="{% url 'core:workout_detail' s.pk %}"
-                style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:rgba(255,255,255,0.03);border-radius:8px;text-decoration:none;transition:0.2s"
-                onmouseover="this.style.background='rgba(255,255,255,0.06)'"
-                onmouseout="this.style.background='rgba(255,255,255,0.03)'">
+            <a href="{% url 'core:workout_detail' s.pk %}" style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:rgba(255,255,255,.03);border-radius:8px;text-decoration:none;transition:.2s" onmouseover="this.style.background='rgba(255,255,255,.06)'" onmouseout="this.style.background='rgba(255,255,255,.03)'">
                 <div>
-                    <div style="font-weight:600;color:var(--text-primary)">{{ s.name|default:"Workout Session" }}</div>
-                    <div style="font-size:12px;color:var(--text-muted)">{{ s.date|date:"M d, Y" }} • {{ s.sets.count }}
-                        sets</div>
+                    <div style="font-weight:600;color:var(--text-primary);font-size:14px">{{ s.name|default:"Workout" }}</div>
+                    <div style="font-size:11px;color:var(--text-muted)">{{ s.date|date:"M d" }} &middot; {{ s.sets.count }} sets</div>
                 </div>
-                <div style="color:var(--text-muted)">→</div>
+                <div style="color:var(--text-muted);font-size:12px">&rarr;</div>
             </a>
             {% endfor %}
         </div>
         {% else %}
-        <div class="empty-state" style="padding:20px">
-            <p style="font-size:13px">No recent data detected.</p>
+        <div style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px">
+            <div style="font-size:32px;margin-bottom:8px">🏋️</div>
+            <p>No workouts yet</p>
+            <a href="{% url 'core:new_workout' %}" class="btn btn-primary btn-sm" style="margin-top:8px">Log First Workout</a>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Active Goals -->
+    <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <h3 style="font-size:16px;font-weight:700">Active Goals</h3>
+            <a href="{% url 'core:add_goal' %}" style="font-size:12px;color:var(--accent);text-decoration:none">+ Add</a>
+        </div>
+        {% if active_goals %}
+        <div style="display:flex;flex-direction:column;gap:12px">
+            {% for g in active_goals %}
+            <div style="padding:10px 12px;background:rgba(255,255,255,.03);border-radius:8px">
+                <div style="font-weight:600;color:var(--text-primary);font-size:13px;margin-bottom:4px">{{ g.title|truncatechars:30 }}</div>
+                <div style="font-size:11px;color:var(--text-muted)">{{ g.get_goal_type_display }} &middot; Target: {{ g.target_date|date:"M d" }}</div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px">
+            <div style="font-size:32px;margin-bottom:8px">🎯</div>
+            <p>No active goals</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- AI Status -->
+    <div class="card" style="background:linear-gradient(135deg,rgba(99,102,241,.06),rgba(249,115,22,.04))">
+        <div style="margin-bottom:16px">
+            <h3 style="font-size:16px;font-weight:700">PulseMind AI</h3>
+        </div>
+        {% if ai_metadata and ai_metadata.last_trained %}
+        <div style="text-align:center;padding:8px 0">
+            <div style="width:10px;height:10px;border-radius:50%;background:var(--success);box-shadow:0 0 8px var(--success);display:inline-block;margin-bottom:8px;animation:pulse 2s infinite"></div>
+            <div style="font-size:14px;font-weight:700;color:var(--text-primary)">{{ ai_metadata.model_name }}</div>
+            <div style="font-size:24px;font-weight:800;color:var(--accent);margin:8px 0">{{ ai_metadata.accuracy }}%</div>
+            <div style="font-size:11px;color:var(--text-muted)">accuracy</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:8px">Trained {{ ai_metadata.last_trained|date:"M d, Y" }}</div>
+        </div>
+        {% else %}
+        <div style="text-align:center;padding:16px 0">
+            <div style="font-size:32px;margin-bottom:8px">🧠</div>
+            <p style="font-size:13px;color:var(--text-muted)">AI not trained yet</p>
+            <a href="{% url 'core:ai_lab' %}" class="btn btn-primary btn-sm" style="margin-top:8px">Go to AI Lab</a>
         </div>
         {% endif %}
     </div>
 </div>
 
-<!-- Quick Actions -->
-<div style="margin-top:32px">
-    <h2 class="section-title" style="margin-bottom:16px">Quick Actions</h2>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px">
-        <a href="{% url 'core:one_rm' %}" class="card"
-            style="text-align:center;padding:24px;text-decoration:none;cursor:pointer"
-            onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
-            <div style="font-size:32px;margin-bottom:8px">⚡</div>
-            <div style="font-weight:600;color:var(--text-primary)">1RM Calculator</div>
-        </a>
-        <a href="{% url 'core:new_workout' %}" class="card" style="text-align:center;padding:24px;text-decoration:none"
-            onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
-            <div style="font-size:32px;margin-bottom:8px">🏋️</div>
-            <div style="font-weight:600;color:var(--text-primary)">Log Workout</div>
-        </a>
-        <a href="{% url 'core:add_measurement' %}" class="card"
-            style="text-align:center;padding:24px;text-decoration:none"
-            onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
-            <div style="font-size:32px;margin-bottom:8px">📏</div>
-            <div style="font-weight:600;color:var(--text-primary)">Body Measurement</div>
-        </a>
-        <a href="{% url 'core:add_nutrition' %}" class="card"
-            style="text-align:center;padding:24px;text-decoration:none"
-            onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
-            <div style="font-size:32px;margin-bottom:8px">🥗</div>
-            <div style="font-weight:600;color:var(--text-primary)">Log Meal</div>
-        </a>
-    </div>
+<!-- ── Quick Actions ──────────────────────────────────────── -->
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px">
+    <a href="{% url 'core:new_workout' %}" class="card" style="text-align:center;padding:20px;text-decoration:none;transition:.2s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+        <div style="font-size:28px;margin-bottom:6px">🏋️</div>
+        <div style="font-weight:600;color:var(--text-primary);font-size:13px">Log Workout</div>
+    </a>
+    <a href="{% url 'core:one_rm' %}" class="card" style="text-align:center;padding:20px;text-decoration:none;transition:.2s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+        <div style="font-size:28px;margin-bottom:6px">⚡</div>
+        <div style="font-weight:600;color:var(--text-primary);font-size:13px">1RM Calculator</div>
+    </a>
+    <a href="{% url 'core:add_measurement' %}" class="card" style="text-align:center;padding:20px;text-decoration:none;transition:.2s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+        <div style="font-size:28px;margin-bottom:6px">📏</div>
+        <div style="font-weight:600;color:var(--text-primary);font-size:13px">Measure Body</div>
+    </a>
+    <a href="{% url 'core:add_nutrition' %}" class="card" style="text-align:center;padding:20px;text-decoration:none;transition:.2s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+        <div style="font-size:28px;margin-bottom:6px">🥗</div>
+        <div style="font-weight:600;color:var(--text-primary);font-size:13px">Log Meal</div>
+    </a>
+    <a href="{% url 'core:ai_lab' %}" class="card" style="text-align:center;padding:20px;text-decoration:none;transition:.2s" onmouseover="this.style.borderColor='#6366f1'" onmouseout="this.style.borderColor='var(--border)'">
+        <div style="font-size:28px;margin-bottom:6px">🧠</div>
+        <div style="font-weight:600;color:var(--text-primary);font-size:13px">AI Lab</div>
+    </a>
 </div>
+
+<style>@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}</style>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-    // Generate last 7 days labels
-    const days = [];
-    for (let i = 6; i >= 0; i--) {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        days.push(d.toLocaleDateString('en-US', { weekday: 'short' }));
-    }
+// ── Activity Chart ───────────────────────────────────────
+const days = [];
+for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    days.push(d.toLocaleDateString('en-US', { weekday: 'short' }));
+}
 
-    const activityCtx = document.getElementById('activityChart').getContext('2d');
-    new Chart(activityCtx, {
-        type: 'bar',
-        data: {
-            labels: days,
-            datasets: [{
-                label: 'Workouts',
-                data: {{ activity_data|default: "[0,0,0,0,0,0,0]" | safe
-        }
+new Chart(document.getElementById('activityChart'), {
+    type: 'bar',
+    data: {
+        labels: days,
+        datasets: [{
+            label: 'Workouts',
+            data: {{ activity_data|safe }},
+            backgroundColor: 'rgba(249,115,22,0.4)',
+            borderColor: '#f97316',
+            borderWidth: 2,
+            borderRadius: 6,
+            hoverBackgroundColor: '#f97316'
+        }]
     },
-        backgroundColor: 'rgba(249, 115, 22, 0.4)',
-        borderColor: '#f97316',
-        borderWidth: 2,
-        borderRadius: 4,
-        hoverBackgroundColor: '#f97316'
-            }]
-        },
-        options: {
+    options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: {
-            legend: { display: false }
-        },
+        plugins: { legend: { display: false } },
         scales: {
-            y: {
+            y: { beginAtZero: true, ticks: { stepSize: 1, color: '#64748b' }, grid: { color: 'rgba(255,255,255,.04)' } },
+            x: { ticks: { color: '#64748b' }, grid: { display: false } }
+        }
+    }
+});
+
+// ── Muscle Coverage Radar ────────────────────────────────
+new Chart(document.getElementById('muscleChart'), {
+    type: 'radar',
+    data: {
+        labels: {{ muscle_labels|safe }},
+        datasets: [{
+            label: 'Volume',
+            data: {{ muscle_values|safe }},
+            backgroundColor: 'rgba(99,102,241,0.15)',
+            borderColor: '#6366f1',
+            borderWidth: 2,
+            pointBackgroundColor: '#6366f1',
+            pointRadius: 3,
+            pointHoverRadius: 5
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+            r: {
                 beginAtZero: true,
-                ticks: { stepSize: 1, color: '#94a3b8' },
-                grid: { color: 'rgba(255,255,255,0.05)' }
-            },
-            x: {
-                ticks: { color: '#94a3b8' },
-                grid: { display: false }
+                ticks: { display: false },
+                grid: { color: 'rgba(255,255,255,.06)' },
+                pointLabels: { color: '#94a3b8', font: { size: 11 } }
             }
         }
     }
-    });
+});
+
+// ── Body Weight Line ─────────────────────────────────────
+{% if bw_values != "[]" %}
+new Chart(document.getElementById('bwChart'), {
+    type: 'line',
+    data: {
+        labels: {{ bw_labels|safe }},
+        datasets: [{
+            label: 'Weight',
+            data: {{ bw_values|safe }},
+            borderColor: '#4ade80',
+            backgroundColor: 'rgba(74,222,128,0.1)',
+            borderWidth: 2,
+            tension: 0.3,
+            fill: true,
+            pointRadius: 4,
+            pointBackgroundColor: '#4ade80'
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+            y: { ticks: { color: '#64748b', callback: v => v + ' kg' }, grid: { color: 'rgba(255,255,255,.04)' } },
+            x: { ticks: { color: '#64748b' }, grid: { display: false } }
+        }
+    }
+});
+{% endif %}
 </script>
 {% endblock %}

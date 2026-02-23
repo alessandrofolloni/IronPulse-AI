@@ -1,718 +1,600 @@
 """
-IronPulse — PulseMind AI Engine
-================================
-From-scratch neural network library using NumPy only.
-Supports multiple sophisticated architectures logged to W&B.
+IronPulse — PulseMind AI Engine (PyTorch)
+==========================================
+Production-grade neural network library for exercise recommendation
+and workout plan generation.
 
-Architectures available:
-  - PulseMindMLP          : Deep Multi-Layer Perceptron (baseline)
-  - PulseMindResNet       : Residual Network (skip connections, avoids vanishing gradient)
-  - PulseMindAttentionNet : Self-Attention + FFN (transformer-inspired, explainable)
-  - PulseMindEnsemble     : Ensemble of multiple models via soft voting
+Architectures
+─────────────
+  • PulseMindMLP       — Deep feed-forward with BatchNorm, Dropout, GELU
+  • PulseMindResNet    — Residual blocks with skip connections
+  • PulseMindAttention — Multi-head self-attention over feature tokens
+  • PulseMindEnsemble  — Soft-voting ensemble of sub-models
 
-All models implement:
-  - forward(X)            : inference pass
-  - get_parameters()      : serialise weights → dict
-  - load_from_dict(d)     : restore weights from dict
-  - feature_importance(X) : gradient-based saliency for explainability
+All models produce:
+  Classification  →  softmax probability over exercises
+  Regression      →  scalar target weight prediction
+
+Feature Vector (18-dim)
+───────────────────────
+  [0]  session_volume      Total weight × reps this session
+  [1]  total_sets          Number of sets performed
+  [2]  unique_exercises    Distinct exercises count
+  [3]  avg_weight          Mean weight per set
+  [4]  max_weight          Heaviest set weight
+  [5]  avg_reps            Mean reps per set
+  [6]  max_reps            Highest reps in a set
+  [7]  avg_1rm             Mean estimated 1RM across sets
+  [8]  best_1rm            Best estimated 1RM
+  [9]  compound_ratio      Fraction of compound movements
+  [10] chest_pct           Chest volume share
+  [11] back_pct            Back volume share
+  [12] legs_pct            Legs volume share
+  [13] shoulder_pct        Shoulder volume share
+  [14] arms_pct            Arms volume share
+  [15] core_pct            Core volume share
+  [16] rest_days           Days since last session
+  [17] monthly_frequency   Sessions in the last 30 days
 """
 
-import numpy as np
-import json
 import logging
+import json
+import math
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+
+try:
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
-# ── Activations ───────────────────────────────────────────────────────────────
+# ── Constants ─────────────────────────────────────────────────────────────────
 
-def relu(z):
-    return np.maximum(0, z)
+N_FEATURES = 18
+FEATURE_NAMES = [
+    'Session Volume', 'Total Sets', 'Unique Exercises',
+    'Avg Weight', 'Max Weight', 'Avg Reps', 'Max Reps',
+    'Avg 1RM', 'Best 1RM', 'Compound Ratio',
+    'Chest %', 'Back %', 'Legs %', 'Shoulder %', 'Arms %', 'Core %',
+    'Rest Days', 'Sessions/Month',
+]
 
-def relu_deriv(z):
-    return (z > 0).astype(float)
+WEIGHTS_DIR = Path(__file__).parent / 'weights'
+WEIGHTS_DIR.mkdir(exist_ok=True)
 
-def leaky_relu(z, alpha=0.01):
-    return np.where(z > 0, z, alpha * z)
 
-def leaky_relu_deriv(z, alpha=0.01):
-    return np.where(z > 0, 1.0, alpha)
+# ══════════════════════════════════════════════════════════════════════════════
+# Architecture 1: Deep MLP
+# ══════════════════════════════════════════════════════════════════════════════
 
-def elu(z, alpha=1.0):
-    return np.where(z > 0, z, alpha * (np.exp(np.clip(z, -500, 0)) - 1))
+class PulseMindMLP(nn.Module):
+    """
+    Deep Multi-Layer Perceptron.
 
-def elu_deriv(z, alpha=1.0):
-    return np.where(z > 0, 1.0, alpha * np.exp(np.clip(z, -500, 0)))
+    Architecture:
+        Input (18) → [Linear → BatchNorm → GELU → Dropout] × N → Output
 
-def softmax(z):
-    e = np.exp(z - np.max(z, axis=1, keepdims=True))
-    return e / np.sum(e, axis=1, keepdims=True)
+    Design choices:
+        - GELU activation (smoother than ReLU, used in BERT/GPT)
+        - BatchNorm for training stability
+        - Dropout for regularisation
+        - He (Kaiming) initialisation
+    """
 
-def sigmoid(z):
-    return 1.0 / (1.0 + np.exp(-np.clip(z, -500, 500)))
+    def __init__(self, input_size: int = N_FEATURES, output_size: int = 60,
+                 hidden_sizes: List[int] = None, dropout: float = 0.3,
+                 mode: str = 'classification'):
+        super().__init__()
+        self.mode = mode
+        self.architecture = 'MLP'
 
-ACTIVATIONS = {
-    'relu':       (relu,       relu_deriv),
-    'leaky_relu': (leaky_relu, leaky_relu_deriv),
-    'elu':        (elu,        elu_deriv),
+        if hidden_sizes is None:
+            hidden_sizes = [256, 128, 64]
+
+        layers = []
+        prev_size = input_size
+        for h in hidden_sizes:
+            layers.extend([
+                nn.Linear(prev_size, h),
+                nn.BatchNorm1d(h),
+                nn.GELU(),
+                nn.Dropout(dropout),
+            ])
+            prev_size = h
+
+        self.backbone = nn.Sequential(*layers)
+        self.head = nn.Linear(prev_size, output_size)
+
+        # Kaiming init
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass: Input → Hidden layers → Head
+
+        For classification: returns log-softmax probabilities
+        For regression: returns raw scalar predictions
+        """
+        h = self.backbone(x)
+        out = self.head(h)
+        if self.mode == 'classification':
+            return F.log_softmax(out, dim=-1)
+        return out
+
+    def get_architecture_info(self) -> Dict:
+        """Return human-readable architecture description."""
+        total_params = sum(p.numel() for p in self.parameters())
+        trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        layers_info = []
+        for name, module in self.named_modules():
+            if isinstance(module, (nn.Linear, nn.BatchNorm1d, nn.Dropout)):
+                info = {'name': name, 'type': type(module).__name__}
+                if isinstance(module, nn.Linear):
+                    info['in'] = module.in_features
+                    info['out'] = module.out_features
+                    info['params'] = module.weight.numel() + (module.bias.numel() if module.bias is not None else 0)
+                elif isinstance(module, nn.BatchNorm1d):
+                    info['features'] = module.num_features
+                elif isinstance(module, nn.Dropout):
+                    info['rate'] = module.p
+                layers_info.append(info)
+        return {
+            'architecture': self.architecture,
+            'total_params': total_params,
+            'trainable_params': trainable,
+            'layers': layers_info,
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Architecture 2: ResNet (Residual Network)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class ResidualBlock(nn.Module):
+    """
+    Residual block: x + F(x)
+    Where F = Linear → BN → GELU → Dropout → Linear → BN
+
+    Skip connection prevents vanishing gradients in deep networks.
+    """
+
+    def __init__(self, dim: int, dropout: float = 0.2):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Linear(dim, dim),
+            nn.BatchNorm1d(dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(dim, dim),
+            nn.BatchNorm1d(dim),
+        )
+        self.act = nn.GELU()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.act(x + self.block(x))
+
+
+class PulseMindResNet(nn.Module):
+    """
+    Residual Network for tabular data.
+
+    Architecture:
+        Input (18) → Projection (→ hidden_dim)
+        → [ResidualBlock] × n_blocks
+        → Output Head
+
+    Key insight: Skip connections let gradients flow directly,
+    enabling much deeper networks without degradation.
+    """
+
+    def __init__(self, input_size: int = N_FEATURES, output_size: int = 60,
+                 hidden_dim: int = 128, n_blocks: int = 4,
+                 dropout: float = 0.2, mode: str = 'classification'):
+        super().__init__()
+        self.mode = mode
+        self.architecture = 'ResNet'
+
+        self.proj = nn.Sequential(
+            nn.Linear(input_size, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.GELU(),
+        )
+
+        self.blocks = nn.Sequential(*[
+            ResidualBlock(hidden_dim, dropout) for _ in range(n_blocks)
+        ])
+
+        self.head = nn.Sequential(
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, output_size),
+        )
+
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h = self.proj(x)
+        h = self.blocks(h)
+        out = self.head(h)
+        if self.mode == 'classification':
+            return F.log_softmax(out, dim=-1)
+        return out
+
+    def get_architecture_info(self) -> Dict:
+        total_params = sum(p.numel() for p in self.parameters())
+        return {
+            'architecture': self.architecture,
+            'total_params': total_params,
+            'trainable_params': total_params,
+            'projection_dim': self.proj[0].out_features,
+            'n_blocks': len(self.blocks),
+            'layers': [
+                {'name': 'projection', 'type': 'Linear+BN+GELU',
+                 'in': self.proj[0].in_features, 'out': self.proj[0].out_features},
+            ] + [
+                {'name': f'res_block_{i}', 'type': 'ResidualBlock',
+                 'dim': self.proj[0].out_features}
+                for i in range(len(self.blocks))
+            ] + [
+                {'name': 'head', 'type': 'Linear',
+                 'in': self.proj[0].out_features,
+                 'out': self.head[-1].out_features}
+            ],
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Architecture 3: Attention Network
+# ══════════════════════════════════════════════════════════════════════════════
+
+class FeatureAttention(nn.Module):
+    """
+    Multi-head attention over input features.
+
+    Each of the 18 features is treated as a "token".
+    Attention learns which features are most important for each prediction.
+
+    Q, K, V are learned projections of each feature scalar → d_model vector.
+    """
+
+    def __init__(self, d_model: int = 64, n_heads: int = 4, dropout: float = 0.1):
+        super().__init__()
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.d_k = d_model // n_heads
+
+        self.W_q = nn.Linear(d_model, d_model)
+        self.W_k = nn.Linear(d_model, d_model)
+        self.W_v = nn.Linear(d_model, d_model)
+        self.W_o = nn.Linear(d_model, d_model)
+
+        self.dropout = nn.Dropout(dropout)
+        self.norm = nn.LayerNorm(d_model)
+
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Args:
+            x: (batch, n_features, d_model)
+        Returns:
+            output: (batch, n_features, d_model)
+            attn_weights: (batch, n_heads, n_features, n_features)
+        """
+        B, N, D = x.shape
+
+        Q = self.W_q(x).view(B, N, self.n_heads, self.d_k).transpose(1, 2)
+        K = self.W_k(x).view(B, N, self.n_heads, self.d_k).transpose(1, 2)
+        V = self.W_v(x).view(B, N, self.n_heads, self.d_k).transpose(1, 2)
+
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
+        attn = F.softmax(scores, dim=-1)
+        attn = self.dropout(attn)
+
+        context = torch.matmul(attn, V)
+        context = context.transpose(1, 2).contiguous().view(B, N, D)
+        out = self.W_o(context)
+
+        return self.norm(x + out), attn
+
+
+class PulseMindAttention(nn.Module):
+    """
+    Transformer-inspired Attention Network.
+
+    Architecture:
+        Input (18 scalars)
+        → Feature Embedding (each scalar → d_model vector)
+        → [Multi-Head Self-Attention + FFN] × n_layers
+        → Global Average Pooling
+        → Classification/Regression Head
+
+    Interpretability: Attention weights show which features
+    the model considers most important for each prediction.
+    """
+
+    def __init__(self, input_size: int = N_FEATURES, output_size: int = 60,
+                 d_model: int = 64, n_heads: int = 4, n_layers: int = 2,
+                 dropout: float = 0.2, mode: str = 'classification'):
+        super().__init__()
+        self.mode = mode
+        self.architecture = 'Attention'
+        self.input_size = input_size
+
+        # Embed each feature scalar into d_model dimensions
+        self.feature_embed = nn.Linear(1, d_model)
+        self.pos_embed = nn.Parameter(torch.randn(1, input_size, d_model) * 0.02)
+
+        self.attention_layers = nn.ModuleList([
+            FeatureAttention(d_model, n_heads, dropout) for _ in range(n_layers)
+        ])
+
+        self.ffn_layers = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(d_model, d_model * 4),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(d_model * 4, d_model),
+                nn.LayerNorm(d_model),
+            ) for _ in range(n_layers)
+        ])
+
+        self.head = nn.Sequential(
+            nn.Linear(d_model, d_model),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_model, output_size),
+        )
+
+        self.last_attn_weights = None
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Input:  (batch, 18)
+        Output: (batch, n_classes) log-probabilities
+        """
+        B, N = x.shape
+        # Reshape: (B, 18) → (B, 18, 1) → embed → (B, 18, d_model)
+        tokens = self.feature_embed(x.unsqueeze(-1)) + self.pos_embed
+
+        for attn_layer, ffn in zip(self.attention_layers, self.ffn_layers):
+            tokens, attn_w = attn_layer(tokens)
+            tokens = tokens + ffn(tokens)
+            self.last_attn_weights = attn_w
+
+        # Global average pooling: (B, 18, d_model) → (B, d_model)
+        pooled = tokens.mean(dim=1)
+        out = self.head(pooled)
+
+        if self.mode == 'classification':
+            return F.log_softmax(out, dim=-1)
+        return out
+
+    def get_attention_weights(self) -> Optional[np.ndarray]:
+        """Get last attention weights for interpretability."""
+        if self.last_attn_weights is not None:
+            return self.last_attn_weights.detach().cpu().numpy()
+        return None
+
+    def get_feature_importance(self) -> np.ndarray:
+        """Derive feature importance from average attention weights."""
+        if self.last_attn_weights is None:
+            return np.ones(self.input_size) / self.input_size
+        # Average across batch and heads: (n_features, n_features)
+        attn = self.last_attn_weights.detach().mean(dim=(0, 1)).cpu().numpy()
+        # Column-sum = how much attention each feature receives
+        importance = attn.sum(axis=0)
+        importance = importance / importance.sum()
+        return importance
+
+    def get_architecture_info(self) -> Dict:
+        total_params = sum(p.numel() for p in self.parameters())
+        return {
+            'architecture': self.architecture,
+            'total_params': total_params,
+            'trainable_params': total_params,
+            'd_model': self.feature_embed.out_features,
+            'n_heads': self.attention_layers[0].n_heads,
+            'n_layers': len(self.attention_layers),
+            'layers': [
+                {'name': 'feature_embed', 'type': 'Linear(1→d_model)',
+                 'out': self.feature_embed.out_features},
+                {'name': 'positional_embed', 'type': 'Learned',
+                 'shape': f'{self.input_size}×{self.feature_embed.out_features}'},
+            ] + [
+                {'name': f'attention_{i}', 'type': 'MultiHeadAttention+FFN',
+                 'd_model': self.feature_embed.out_features}
+                for i in range(len(self.attention_layers))
+            ] + [
+                {'name': 'pool', 'type': 'GlobalAveragePool'},
+                {'name': 'head', 'type': 'Linear→GELU→Linear',
+                 'out': self.head[-1].out_features},
+            ],
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Architecture 4: Ensemble
+# ══════════════════════════════════════════════════════════════════════════════
+
+class PulseMindEnsemble(nn.Module):
+    """
+    Ensemble: combines MLP + ResNet via learned soft-voting.
+
+    Architecture:
+        Input → MLP  → logits_1
+              → ResNet → logits_2
+        → Learned weighted combination → Output
+
+    Typically achieves highest accuracy by reducing variance.
+    """
+
+    def __init__(self, input_size: int = N_FEATURES, output_size: int = 60,
+                 dropout: float = 0.2, mode: str = 'classification'):
+        super().__init__()
+        self.mode = mode
+        self.architecture = 'Ensemble'
+
+        self.mlp = PulseMindMLP(
+            input_size, output_size,
+            hidden_sizes=[128, 64], dropout=dropout, mode='regression'
+        )
+        self.resnet = PulseMindResNet(
+            input_size, output_size,
+            hidden_dim=96, n_blocks=3, dropout=dropout, mode='regression'
+        )
+
+        # Learned combination weights
+        self.weight_mlp = nn.Parameter(torch.tensor(0.5))
+        self.weight_res = nn.Parameter(torch.tensor(0.5))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        w = F.softmax(torch.stack([self.weight_mlp, self.weight_res]), dim=0)
+        logits = w[0] * self.mlp(x) + w[1] * self.resnet(x)
+        if self.mode == 'classification':
+            return F.log_softmax(logits, dim=-1)
+        return logits
+
+    def get_architecture_info(self) -> Dict:
+        total_params = sum(p.numel() for p in self.parameters())
+        w = F.softmax(torch.stack([self.weight_mlp, self.weight_res]), dim=0)
+        return {
+            'architecture': self.architecture,
+            'total_params': total_params,
+            'trainable_params': total_params,
+            'sub_models': ['MLP', 'ResNet'],
+            'weights': [f'{w[0].item():.2%}', f'{w[1].item():.2%}'],
+            'layers': [
+                {'name': 'sub_mlp', 'type': 'PulseMindMLP',
+                 'params': sum(p.numel() for p in self.mlp.parameters())},
+                {'name': 'sub_resnet', 'type': 'PulseMindResNet',
+                 'params': sum(p.numel() for p in self.resnet.parameters())},
+                {'name': 'voting', 'type': 'LearnedSoftVoting'},
+            ],
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Model Registry & Factory
+# ══════════════════════════════════════════════════════════════════════════════
+
+MODEL_REGISTRY = {
+    'mlp':       PulseMindMLP,
+    'resnet':    PulseMindResNet,
+    'attention': PulseMindAttention,
+    'ensemble':  PulseMindEnsemble,
 }
 
 
-# ── Weight Initialisation ─────────────────────────────────────────────────────
-
-def he_init(fan_in, fan_out):
-    """He (Kaiming) initialisation — optimal for ReLU family."""
-    return np.random.randn(fan_in, fan_out) * np.sqrt(2.0 / fan_in)
-
-def xavier_init(fan_in, fan_out):
-    """Glorot/Xavier initialisation — balanced for tanh / sigmoid."""
-    limit = np.sqrt(6.0 / (fan_in + fan_out))
-    return np.random.uniform(-limit, limit, (fan_in, fan_out))
-
-
-# ── Layer Normalisation (simplified) ─────────────────────────────────────────
-
-class LayerNorm:
+def build_model(arch: str, input_size: int = N_FEATURES,
+                output_size: int = 60, mode: str = 'classification',
+                **kwargs) -> nn.Module:
     """
-    Normalise across feature dimension (μ=0, σ=1) with learnable scale/shift.
-    Improves training stability, especially for deep or attention networks.
-    """
-    def __init__(self, size, eps=1e-6):
-        self.gamma = np.ones((1, size))
-        self.beta  = np.zeros((1, size))
-        self.eps   = eps
-        self._cache = {}
-
-    def forward(self, x):
-        mu  = x.mean(axis=1, keepdims=True)
-        var = x.var(axis=1,  keepdims=True)
-        x_norm = (x - mu) / np.sqrt(var + self.eps)
-        self._cache = {'x': x, 'mu': mu, 'var': var, 'x_norm': x_norm}
-        return self.gamma * x_norm + self.beta
-
-    def backward(self, dout):
-        x_norm = self._cache['x_norm']
-        var    = self._cache['var']
-        x      = self._cache['x']
-        mu     = self._cache['mu']
-        m      = x.shape[1]
-        dgamma = np.sum(dout * x_norm, axis=0, keepdims=True)
-        dbeta  = np.sum(dout, axis=0, keepdims=True)
-        dx_norm = dout * self.gamma
-        dvar = np.sum(dx_norm * (x - mu) * -0.5 * (var + self.eps) ** -1.5, axis=1, keepdims=True)
-        dmu  = np.sum(dx_norm * -1 / np.sqrt(var + self.eps), axis=1, keepdims=True)
-        dx   = dx_norm / np.sqrt(var + self.eps) + dvar * 2 * (x - mu) / m + dmu / m
-        self.gamma -= 0.001 * dgamma   # micro-update (trainer handles LR)
-        self.beta  -= 0.001 * dbeta
-        return dx
-
-    def get_parameters(self):
-        return {'gamma': self.gamma.tolist(), 'beta': self.beta.tolist()}
-
-    def load_from_dict(self, d):
-        self.gamma = np.array(d['gamma'])
-        self.beta  = np.array(d['beta'])
-
-
-# ── Dropout ───────────────────────────────────────────────────────────────────
-
-class Dropout:
-    def __init__(self, rate=0.3):
-        self.rate = rate
-        self._mask = None
-        self.training = True
-
-    def forward(self, x):
-        if not self.training or self.rate == 0:
-            return x
-        self._mask = (np.random.rand(*x.shape) > self.rate) / (1 - self.rate)
-        return x * self._mask
-
-    def backward(self, dout):
-        if self._mask is None:
-            return dout
-        return dout * self._mask
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Architecture 1: PulseMindMLP — Deep Multi-Layer Perceptron
-# ══════════════════════════════════════════════════════════════════════════════
-
-class PulseMindMLP:
-    """
-    Deep MLP with He init, configurable activation, optional BatchNorm & Dropout.
-    Acts as both classifier (softmax) and regressor (linear output).
+    Factory function to build a PulseMind model.
 
     Parameters
     ----------
-    layer_sizes   : list[int]  full layer dimensions [input, h1, …, output]
-    activation    : str        'relu' | 'leaky_relu' | 'elu'
-    dropout_rate  : float      0 = disabled
-    mode          : str        'classification' | 'regression'
-    """
-
-    def __init__(self, layer_sizes, activation='relu', dropout_rate=0.0, mode='classification'):
-        self.layer_sizes   = layer_sizes
-        self.activation    = activation
-        self.dropout_rate  = dropout_rate
-        self.mode          = mode
-        self.act_fn, self.act_deriv = ACTIVATIONS[activation]
-        self.training = True
-
-        self.weights   = []
-        self.biases    = []
-        self.dropouts  = []
-        self.layer_norms = []
-        self.activations_cache = []
-
-        for i in range(len(layer_sizes) - 1):
-            self.weights.append(he_init(layer_sizes[i], layer_sizes[i + 1]))
-            self.biases.append(np.zeros((1, layer_sizes[i + 1])))
-            self.dropouts.append(Dropout(dropout_rate))
-            self.layer_norms.append(LayerNorm(layer_sizes[i + 1]))
-
-    def set_training(self, flag: bool):
-        self.training = flag
-        for d in self.dropouts:
-            d.training = flag
-
-    def forward(self, X):
-        self.activations_cache = [X]
-        self.z_cache = []
-        curr = X
-        n_layers = len(self.weights)
-
-        for i, (W, b) in enumerate(zip(self.weights, self.biases)):
-            z = curr @ W + b
-            self.z_cache.append(z)
-
-            if i < n_layers - 1:
-                # Hidden layer: activation → LayerNorm → Dropout
-                a = self.act_fn(z)
-                a = self.layer_norms[i].forward(a)
-                a = self.dropouts[i].forward(a)
-            else:
-                # Output layer
-                if self.mode == 'classification':
-                    a = softmax(z)
-                else:
-                    a = z   # linear output for regression
-
-            self.activations_cache.append(a)
-            curr = a
-
-        return curr
-
-    def backward(self, dout):
-        """Returns list of (dW, db) tuples from last → first layer."""
-        n = len(self.weights)
-        grads = []
-        curr_d = dout
-
-        for i in reversed(range(n)):
-            if i < n - 1:
-                curr_d = self.dropouts[i].backward(curr_d)
-                curr_d = self.layer_norms[i].backward(curr_d)
-                curr_d = curr_d * self.act_deriv(self.z_cache[i])
-
-            dW = self.activations_cache[i].T @ curr_d
-            db = curr_d.sum(axis=0, keepdims=True)
-            grads.append((dW, db))
-
-            if i > 0:
-                curr_d = curr_d @ self.weights[i].T
-
-        grads.reverse()
-        return grads
-
-    def get_parameters(self):
-        return {
-            'architecture': 'MLP',
-            'layer_sizes': self.layer_sizes,
-            'activation': self.activation,
-            'mode': self.mode,
-            'weights': [w.tolist() for w in self.weights],
-            'biases':  [b.tolist() for b in self.biases],
-        }
-
-    def load_from_dict(self, d):
-        self.weights = [np.array(w) for w in d['weights']]
-        self.biases  = [np.array(b) for b in d['biases']]
-
-    def feature_importance(self, X):
-        """Gradient-based saliency: mean |∂output/∂input| per feature."""
-        self.set_training(False)
-        out = self.forward(X)
-        # Upstream gradient: ones (sum over classes)
-        dout = np.ones_like(out) / out.shape[1]
-        n    = len(self.weights)
-        curr_d = dout
-
-        for i in reversed(range(n)):
-            if i < n - 1:
-                curr_d = curr_d * self.act_deriv(self.z_cache[i])
-            if i > 0:
-                curr_d = curr_d @ self.weights[i].T
-
-        importance = np.abs(curr_d).mean(axis=0)
-        return importance / (importance.sum() + 1e-9)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Architecture 2: PulseMindResNet — Residual Network
-# ══════════════════════════════════════════════════════════════════════════════
-
-class ResidualBlock:
-    """
-    Two-layer residual block with skip connection.
-    Forces the sub-network to learn the *residual* Δ, not the full mapping.
-    Effectively eliminates vanishing gradients in very deep networks.
-    """
-
-    def __init__(self, size, activation='relu', dropout_rate=0.0):
-        self.W1 = he_init(size, size)
-        self.b1 = np.zeros((1, size))
-        self.W2 = he_init(size, size)
-        self.b2 = np.zeros((1, size))
-        self.act_fn, self.act_deriv = ACTIVATIONS[activation]
-        self.dropout = Dropout(dropout_rate)
-        self.ln1 = LayerNorm(size)
-        self.ln2 = LayerNorm(size)
-        self._cache = {}
-
-    def forward(self, x):
-        identity = x
-        z1 = x @ self.W1 + self.b1
-        a1 = self.ln1.forward(self.act_fn(z1))
-        a1 = self.dropout.forward(a1)
-        z2 = a1 @ self.W2 + self.b2
-        a2 = self.ln2.forward(z2)
-        out = self.act_fn(a2 + identity)   # skip connection
-        self._cache = {'x': x, 'z1': z1, 'a1': a1, 'z2': z2, 'a2': a2}
-        return out
-
-    def backward(self, dout):
-        cache = self._cache
-        # dout flows through both skip path and main path
-        d_main = dout * self.act_deriv(cache['a2'] + cache['x'])
-
-        # Layer 2
-        d_ln2  = self.ln2.backward(d_main)
-        dW2    = cache['a1'].T @ d_ln2
-        db2    = d_ln2.sum(0, keepdims=True)
-        da1    = d_ln2 @ self.W2.T
-
-        # Layer 1
-        da1    = self.dropout.backward(da1)
-        da1    = self.ln1.backward(da1)
-        d_z1   = da1 * self.act_deriv(cache['z1'])
-        dW1    = cache['x'].T @ d_z1
-        db1    = d_z1.sum(0, keepdims=True)
-        d_skip = dout * self.act_deriv(cache['a2'] + cache['x'])
-        dx     = d_z1 @ self.W1.T + d_skip   # skip gradient
-
-        return dx, [(dW1, db1), (dW2, db2)]
-
-    def get_parameters(self):
-        return {
-            'W1': self.W1.tolist(), 'b1': self.b1.tolist(),
-            'W2': self.W2.tolist(), 'b2': self.b2.tolist(),
-        }
-
-    def load_from_dict(self, d):
-        self.W1 = np.array(d['W1']); self.b1 = np.array(d['b1'])
-        self.W2 = np.array(d['W2']); self.b2 = np.array(d['b2'])
-
-
-class PulseMindResNet:
-    """
-    Input → Projection → N × ResidualBlocks → Output head.
-    Preferred for deeper architectures (>4 layers) where plain MLPs degrade.
-    """
-
-    def __init__(self, input_size, hidden_size, n_blocks, output_size,
-                 activation='relu', dropout_rate=0.0, mode='classification'):
-        self.mode = mode
-        self.hidden_size = hidden_size
-        self.n_blocks = n_blocks
-        self.output_size = output_size
-
-        # Projection: input_size → hidden_size
-        self.proj_W = he_init(input_size, hidden_size)
-        self.proj_b = np.zeros((1, hidden_size))
-        self.proj_ln = LayerNorm(hidden_size)
-
-        self.blocks = [
-            ResidualBlock(hidden_size, activation, dropout_rate)
-            for _ in range(n_blocks)
-        ]
-
-        # Output head
-        self.head_W = he_init(hidden_size, output_size)
-        self.head_b = np.zeros((1, output_size))
-
-        self._cache = {}
-
-    def set_training(self, flag):
-        for block in self.blocks:
-            block.dropout.training = flag
-
-    def forward(self, X):
-        # Projection
-        z_proj = X @ self.proj_W + self.proj_b
-        a_proj = self.proj_ln.forward(np.maximum(0, z_proj))
-        self._cache['X'] = X
-        self._cache['z_proj'] = z_proj
-        self._cache['a_proj'] = a_proj
-
-        # Residual blocks
-        curr = a_proj
-        self._cache['block_inputs'] = []
-        for block in self.blocks:
-            self._cache['block_inputs'].append(curr)
-            curr = block.forward(curr)
-        self._cache['after_blocks'] = curr
-
-        # Head
-        out = curr @ self.head_W + self.head_b
-        if self.mode == 'classification':
-            out = softmax(out)
-        self._cache['out'] = out
-        return out
-
-    def backward(self, dout):
-        grads = []
-        # Head
-        dW_head = self._cache['after_blocks'].T @ dout
-        db_head = dout.sum(0, keepdims=True)
-        grads.append((dW_head, db_head))
-        d_curr = dout @ self.head_W.T
-
-        # Residual blocks (reverse)
-        for block in reversed(self.blocks):
-            d_curr, block_grads = block.backward(d_curr)
-            grads.extend(block_grads)
-
-        # Projection
-        d_proj = self.proj_ln.backward(d_curr)
-        d_proj *= (self._cache['z_proj'] > 0)
-        dW_proj = self._cache['X'].T @ d_proj
-        db_proj = d_proj.sum(0, keepdims=True)
-        grads.append((dW_proj, db_proj))
-        grads.reverse()
-        return grads
-
-    def _all_weights(self):
-        """Flat list of (W, b) pairs for the gradient update step."""
-        pairs = [(self.proj_W, self.proj_b)]
-        for block in self.blocks:
-            pairs += [(block.W1, block.b1), (block.W2, block.b2)]
-        pairs.append((self.head_W, self.head_b))
-        return pairs
-
-    def get_parameters(self):
-        return {
-            'architecture': 'ResNet',
-            'hidden_size': self.hidden_size,
-            'n_blocks': self.n_blocks,
-            'output_size': self.output_size,
-            'mode': self.mode,
-            'proj_W': self.proj_W.tolist(),
-            'proj_b': self.proj_b.tolist(),
-            'blocks': [b.get_parameters() for b in self.blocks],
-            'head_W': self.head_W.tolist(),
-            'head_b': self.head_b.tolist(),
-        }
-
-    def load_from_dict(self, d):
-        self.proj_W = np.array(d['proj_W'])
-        self.proj_b = np.array(d['proj_b'])
-        for block, bp in zip(self.blocks, d['blocks']):
-            block.load_from_dict(bp)
-        self.head_W = np.array(d['head_W'])
-        self.head_b = np.array(d['head_b'])
-
-    def feature_importance(self, X):
-        """Gradient-based saliency (input → output sensitivity)."""
-        self.set_training(False)
-        out = self.forward(X)
-        dout = np.ones_like(out) / out.shape[1]
-        grads = self.backward(dout)
-        # Last grad pair is projection input gradient
-        dx = X * (grads[0][0].T * np.ones_like(X))
-        importance = np.abs(dx).mean(axis=0)
-        return importance / (importance.sum() + 1e-9)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Architecture 3: PulseMindAttentionNet — Transformer-Inspired (Explainable)
-# ══════════════════════════════════════════════════════════════════════════════
-
-class ScaledDotProductAttention:
-    """
-    Single-head scaled dot-product attention.
-    Attention scores double as explainability weights:
-    feature i attending to feature j tells us how much feature i
-    depends on feature j for a given prediction.
-    """
-
-    def __init__(self, d_model):
-        scale = np.sqrt(d_model)
-        self.W_Q = he_init(d_model, d_model) / scale
-        self.W_K = he_init(d_model, d_model) / scale
-        self.W_V = he_init(d_model, d_model) / scale
-        self.W_O = he_init(d_model, d_model) / scale
-        self._cache = {}
-        self.attn_weights = None   # stored for interpretability
-
-    def forward(self, x):
-        """x: (batch, seq, d_model) — here seq = feature dimension."""
-        Q = x @ self.W_Q
-        K = x @ self.W_K
-        V = x @ self.W_V
-        d = Q.shape[-1]
-        scores = Q @ K.transpose(0, 2, 1) / np.sqrt(d)
-        attn = softmax(scores.reshape(-1, scores.shape[-1])).reshape(scores.shape)
-        self.attn_weights = attn   # (batch, seq, seq) — inspectable
-        ctx = attn @ V
-        out = ctx @ self.W_O
-        self._cache = {'x': x, 'Q': Q, 'K': K, 'V': V, 'attn': attn, 'ctx': ctx}
-        return out
-
-    def get_parameters(self):
-        return {
-            'W_Q': self.W_Q.tolist(), 'W_K': self.W_K.tolist(),
-            'W_V': self.W_V.tolist(), 'W_O': self.W_O.tolist(),
-        }
-
-    def load_from_dict(self, d):
-        self.W_Q = np.array(d['W_Q']); self.W_K = np.array(d['W_K'])
-        self.W_V = np.array(d['W_V']); self.W_O = np.array(d['W_O'])
-
-
-class PulseMindAttentionNet:
-    """
-    Transformer-inspired architecture:
-        Input → Token Embedding → N × (Attention + FFN + LayerNorm) → Pool → Head
-
-    Features as "tokens": each input feature becomes a 1×d_model embedding,
-    then attention reveals cross-feature dependencies (fully explainable via attn_weights).
-
-    Best for: understanding WHICH features drive predictions (explainability).
-    """
-
-    def __init__(self, input_size, d_model=32, n_heads=1, n_layers=2,
-                 output_size=1, dropout_rate=0.0, mode='classification'):
-        self.input_size  = input_size
-        self.d_model     = d_model
-        self.n_layers    = n_layers
-        self.output_size = output_size
-        self.mode        = mode
-
-        # Feature embedding: each scalar → d_model vector
-        self.embed_W = he_init(1, d_model)
-        self.embed_b = np.zeros((1, d_model))
-
-        # Transformer layers
-        self.attn_layers = [ScaledDotProductAttention(d_model) for _ in range(n_layers)]
-        self.ffn_W1 = [he_init(d_model, d_model * 4) for _ in range(n_layers)]
-        self.ffn_b1 = [np.zeros((1, d_model * 4)) for _ in range(n_layers)]
-        self.ffn_W2 = [he_init(d_model * 4, d_model) for _ in range(n_layers)]
-        self.ffn_b2 = [np.zeros((1, d_model)) for _ in range(n_layers)]
-        self.lns_pre  = [LayerNorm(d_model) for _ in range(n_layers)]
-        self.lns_post = [LayerNorm(d_model) for _ in range(n_layers)]
-
-        # Output head (after mean pooling over features)
-        self.head_W = he_init(d_model, output_size)
-        self.head_b = np.zeros((1, output_size))
-
-        self._cache = {}
-
-    def set_training(self, flag):
-        pass  # no dropout in attention by default
-
-    def forward(self, X):
-        """X: (batch, input_size)  →  out: (batch, output_size)"""
-        batch = X.shape[0]
-        # Embed: (batch, input_size, 1) → (batch, input_size, d_model)
-        x_3d = X[:, :, np.newaxis]       # (batch, seq, 1)
-        tokens = x_3d @ self.embed_W.T[np.newaxis] + self.embed_b   # (batch, seq, d_model)
-
-        for i in range(self.n_layers):
-            # Pre-norm attention
-            normed  = np.array([self.lns_pre[i].forward(tokens[b]) for b in range(batch)])
-            attn_out = self.attn_layers[i].forward(normed)
-            tokens  = tokens + attn_out    # residual
-
-            # FFN
-            normed2 = np.array([self.lns_post[i].forward(tokens[b]) for b in range(batch)])
-            ff1 = np.maximum(0, normed2 @ self.ffn_W1[i] + self.ffn_b1[i])
-            ff2 = ff1 @ self.ffn_W2[i] + self.ffn_b2[i]
-            tokens = tokens + ff2          # residual
-
-        # Mean pool over sequence (feature) dimension → (batch, d_model)
-        pooled = tokens.mean(axis=1)
-        out = pooled @ self.head_W + self.head_b
-        if self.mode == 'classification':
-            out = softmax(out)
-        self._cache = {'X': X, 'tokens': tokens, 'pooled': pooled}
-        return out
-
-    def feature_importance(self, X):
-        """
-        Attention-based importance:
-        Mean attention weight received by each feature token across all layers.
-        This is directly interpretable: which input features does the model attend to?
-        """
-        self.forward(X)
-        importances = np.zeros(X.shape[1])
-        for layer in self.attn_layers:
-            if layer.attn_weights is not None:
-                # Mean over batch and head: (seq, seq) → sum per column (received attention)
-                importances += layer.attn_weights.mean(axis=(0, 1))
-        importances = np.abs(importances)
-        return importances / (importances.sum() + 1e-9)
-
-    def get_parameters(self):
-        return {
-            'architecture': 'AttentionNet',
-            'input_size':  self.input_size,
-            'd_model':     self.d_model,
-            'n_layers':    self.n_layers,
-            'output_size': self.output_size,
-            'mode':        self.mode,
-            'embed_W':     self.embed_W.tolist(),
-            'embed_b':     self.embed_b.tolist(),
-            'attn_layers': [a.get_parameters() for a in self.attn_layers],
-            'ffn_W1':      [w.tolist() for w in self.ffn_W1],
-            'ffn_b1':      [b.tolist() for b in self.ffn_b1],
-            'ffn_W2':      [w.tolist() for w in self.ffn_W2],
-            'ffn_b2':      [b.tolist() for b in self.ffn_b2],
-            'head_W':      self.head_W.tolist(),
-            'head_b':      self.head_b.tolist(),
-        }
-
-    def load_from_dict(self, d):
-        self.embed_W  = np.array(d['embed_W'])
-        self.embed_b  = np.array(d['embed_b'])
-        for layer, ld in zip(self.attn_layers, d['attn_layers']):
-            layer.load_from_dict(ld)
-        self.ffn_W1   = [np.array(w) for w in d['ffn_W1']]
-        self.ffn_b1   = [np.array(b) for b in d['ffn_b1']]
-        self.ffn_W2   = [np.array(w) for w in d['ffn_W2']]
-        self.ffn_b2   = [np.array(b) for b in d['ffn_b2']]
-        self.head_W   = np.array(d['head_W'])
-        self.head_b   = np.array(d['head_b'])
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Architecture 4: PulseMindEnsemble — Soft-Voting Ensemble
-# ══════════════════════════════════════════════════════════════════════════════
-
-class PulseMindEnsemble:
-    """
-    Combines multiple base models via soft-voting (averaged probabilities).
-    Dramatically reduces variance vs any single model — best for final predictions.
-    Sub-models can be MLP, ResNet, or AttentionNet.
-    """
-
-    def __init__(self, models, weights=None):
-        self.models  = models
-        self.weights = weights or [1.0 / len(models)] * len(models)
-
-    def set_training(self, flag):
-        for m in self.models:
-            m.set_training(flag)
-
-    def forward(self, X):
-        preds = np.stack([m.forward(X) for m in self.models], axis=0)  # (n_models, batch, out)
-        w = np.array(self.weights)[:, np.newaxis, np.newaxis]
-        return (preds * w).sum(axis=0)
-
-    def feature_importance(self, X):
-        importances = np.stack([m.feature_importance(X) for m in self.models])
-        return importances.mean(axis=0)
-
-    def get_parameters(self):
-        return {
-            'architecture': 'Ensemble',
-            'weights': self.weights,
-            'models':  [m.get_parameters() for m in self.models],
-        }
-
-    def load_from_dict(self, d):
-        self.weights = d['weights']
-        for model, md in zip(self.models, d['models']):
-            model.load_from_dict(md)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Legacy Aliases (backwards compatible with old views.py / train_pulse_mind.py)
-# ══════════════════════════════════════════════════════════════════════════════
-
-def PulseMindClassifier(input_size, hidden_layers, output_size, activation='relu', dropout_rate=0.0):
-    """Factory: builds a PulseMindMLP for classification."""
-    sizes = [input_size] + hidden_layers + [output_size]
-    return PulseMindMLP(sizes, activation=activation, dropout_rate=dropout_rate, mode='classification')
-
-
-def PulseMindRegressor(input_size, hidden_layers, activation='relu', dropout_rate=0.0):
-    """Factory: builds a PulseMindMLP for regression (single output)."""
-    sizes = [input_size] + hidden_layers + [1]
-    return PulseMindMLP(sizes, activation=activation, dropout_rate=dropout_rate, mode='regression')
-
-
-# ── Model Registry ────────────────────────────────────────────────────────────
-
-MODEL_REGISTRY = {
-    'mlp':          PulseMindMLP,
-    'resnet':       PulseMindResNet,
-    'attention':    PulseMindAttentionNet,
-    'ensemble':     PulseMindEnsemble,
-}
-
-
-def build_model(arch: str, input_size: int, output_size: int, mode: str = 'classification', **kwargs):
-    """
-    Convenience factory for all architectures.
-
-    Examples
-    --------
-    >>> model = build_model('mlp', 18, 10, hidden_layers=[256, 128, 64])
-    >>> model = build_model('resnet', 18, 10, hidden_size=128, n_blocks=4)
-    >>> model = build_model('attention', 18, 10, d_model=32, n_layers=3)
+    arch : str
+        One of 'mlp', 'resnet', 'attention', 'ensemble'
+    input_size : int
+        Number of input features (default 18)
+    output_size : int
+        Number of output classes/targets
+    mode : str
+        'classification' or 'regression'
+    **kwargs : dict
+        Architecture-specific arguments (hidden_sizes, n_blocks, etc.)
+
+    Returns
+    -------
+    nn.Module
+        Initialised model ready for training
     """
     arch = arch.lower()
-    if arch == 'mlp':
-        hidden = kwargs.get('hidden_layers', [256, 128, 64])
-        sizes  = [input_size] + hidden + [output_size]
-        return PulseMindMLP(
-            sizes,
-            activation    = kwargs.get('activation', 'relu'),
-            dropout_rate  = kwargs.get('dropout_rate', 0.2),
-            mode          = mode,
-        )
-    elif arch == 'resnet':
-        return PulseMindResNet(
-            input_size,
-            hidden_size   = kwargs.get('hidden_size', 128),
-            n_blocks      = kwargs.get('n_blocks', 4),
-            output_size   = output_size,
-            activation    = kwargs.get('activation', 'relu'),
-            dropout_rate  = kwargs.get('dropout_rate', 0.2),
-            mode          = mode,
-        )
-    elif arch == 'attention':
-        return PulseMindAttentionNet(
-            input_size,
-            d_model       = kwargs.get('d_model', 32),
-            n_layers      = kwargs.get('n_layers', 3),
-            output_size   = output_size,
-            dropout_rate  = kwargs.get('dropout_rate', 0.1),
-            mode          = mode,
-        )
-    elif arch == 'ensemble':
-        sub_archs = kwargs.get('sub_archs', ['mlp', 'resnet'])
-        sub_models = [build_model(a, input_size, output_size, mode, **kwargs) for a in sub_archs]
-        return PulseMindEnsemble(sub_models)
+    if arch not in MODEL_REGISTRY:
+        raise ValueError(f"Unknown architecture '{arch}'. Choose from: {list(MODEL_REGISTRY.keys())}")
+
+    model_cls = MODEL_REGISTRY[arch]
+    return model_cls(input_size=input_size, output_size=output_size, mode=mode, **kwargs)
+
+
+def save_model(model: nn.Module, name: str = 'pulsemind') -> Path:
+    """Save model weights + architecture info to disk."""
+    path = WEIGHTS_DIR / f'{name}.pt'
+    torch.save({
+        'architecture': model.architecture,
+        'state_dict': model.state_dict(),
+        'arch_info': model.get_architecture_info(),
+    }, path)
+    logger.info(f"Model saved to {path}")
+    return path
+
+
+def load_model(name: str = 'pulsemind', input_size: int = N_FEATURES,
+               output_size: int = 60, mode: str = 'classification') -> nn.Module:
+    """Load model from disk."""
+    path = WEIGHTS_DIR / f'{name}.pt'
+    if not path.exists():
+        raise FileNotFoundError(f"No saved model at {path}")
+
+    checkpoint = torch.load(path, map_location='cpu', weights_only=False)
+    arch = checkpoint['architecture'].lower()
+    model = build_model(arch, input_size=input_size, output_size=output_size, mode=mode)
+    model.load_state_dict(checkpoint['state_dict'])
+    model.eval()
+    logger.info(f"Loaded {arch} model from {path}")
+    return model
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Feature Importance (gradient-based saliency)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def compute_feature_importance(model: nn.Module, X: torch.Tensor) -> np.ndarray:
+    """
+    Compute feature importance via gradient-based saliency.
+
+    Method: For each input, compute |∂output/∂input| and average across
+    the batch. Features with large gradients have the most influence.
+    """
+    model.eval()
+    X = X.clone().detach().requires_grad_(True)
+
+    output = model(X)
+    if output.dim() > 1 and output.shape[1] > 1:
+        # Classification: sum of max-class log-probs
+        target = output.max(dim=1).values.sum()
     else:
-        raise ValueError(f"Unknown architecture '{arch}'. Choose from: {list(MODEL_REGISTRY)}")
+        target = output.sum()
+
+    target.backward()
+
+    importance = X.grad.abs().mean(dim=0).detach().cpu().numpy()
+    importance = importance / (importance.sum() + 1e-9)
+    return importance

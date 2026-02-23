@@ -14,8 +14,7 @@
             <div class="form-group">
                 <label class="form-label">{{ field.label }}</label>
                 {{ field }}
-                {% if field.help_text %}<div style="font-size:12px;color:var(--text-muted);margin-top:4px">{{
-                    field.help_text }}</div>{% endif %}
+                {% if field.help_text %}<div style="font-size:12px;color:var(--text-muted);margin-top:4px">{{ field.help_text }}</div>{% endif %}
                 {% if field.errors %}<div style="color:var(--danger);font-size:13px;margin-top:4px">{{ field.errors.0 }}
                 </div>{% endif %}
             </div>

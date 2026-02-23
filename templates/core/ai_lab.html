@@ -1,180 +1,355 @@
 {% extends 'base.html' %}
 {% block title %}PulseMind AI Lab{% endblock %}
-{% block page_title %}🧠 PulseMind Intelligence Lab{% endblock %}
+{% block page_title %}🧠 PulseMind AI{% endblock %}
 
 {% block content %}
 
-<div class="section-title">AI Laboratory</div>
-<p class="section-subtitle">Train, evaluate and understand your custom neural network for workout optimisation.</p>
-
-<!-- Status Banner -->
-<div class="ai-status-banner">
-    <div class="ai-status-dot {% if metadata and metadata.last_trained %}active{% else %}idle{% endif %}" id="status-dot"></div>
-    <span id="status-label">{% if metadata and metadata.last_trained %}Model Active — {{ metadata.model_name }}{% else %}No Model Trained{% endif %}</span>
-    <span class="ai-status-sep">|</span>
-    <span class="ai-status-meta" id="status-acc">{% if metadata and metadata.accuracy %}Accuracy: <strong>{{ metadata.accuracy|floatformat:1 }}%</strong>{% else %}—{% endif %}</span>
-    <span class="ai-status-sep">|</span>
-    <span class="ai-status-meta" id="status-trained">{% if metadata and metadata.last_trained %}Last trained: <strong>{{ metadata.last_trained|date:"M d, Y H:i" }}</strong>{% else %}Never trained{% endif %}</span>
-    <span class="ai-status-sep">|</span>
-    <span class="ai-status-meta">Samples: <strong>{% if metadata %}{{ metadata.total_training_samples }}{% else %}0{% endif %}</strong></span>
+<!-- ── Status Bar ──────────────────────────────────────────── -->
+<div class="card" style="margin-bottom:24px;padding:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">
+    <div style="display:flex;align-items:center;gap:16px">
+        {% if metadata.last_trained %}
+        <div style="width:10px;height:10px;border-radius:50%;background:var(--success);box-shadow:0 0 10px var(--success);flex-shrink:0;animation:statusPulse 2s infinite"></div>
+        <div>
+            <div style="font-weight:700;color:var(--text-primary)">{{ metadata.model_name }}</div>
+            <div style="font-size:12px;color:var(--text-muted)">Trained {{ metadata.last_trained|date:"M d, Y H:i" }} &middot; v{{ metadata.version }}</div>
+        </div>
+        {% else %}
+        <div style="width:10px;height:10px;border-radius:50%;background:var(--text-muted);flex-shrink:0"></div>
+        <div>
+            <div style="font-weight:700;color:var(--text-primary)">PulseMind AI</div>
+            <div style="font-size:12px;color:var(--text-muted)">Not trained yet</div>
+        </div>
+        {% endif %}
+    </div>
+    <div style="display:flex;gap:20px;text-align:center">
+        <div>
+            <div style="font-size:26px;font-weight:800;color:var(--accent-light)">{% if metadata.accuracy %}{{ metadata.accuracy }}%{% else %}—{% endif %}</div>
+            <div style="font-size:11px;color:var(--text-muted)">Test Accuracy</div>
+        </div>
+        <div>
+            <div style="font-size:26px;font-weight:800;color:#6366f1">{{ exercise_count }}</div>
+            <div style="font-size:11px;color:var(--text-muted)">Exercises</div>
+        </div>
+        <div>
+            <div style="font-size:26px;font-weight:800;color:#4ade80">{{ session_count }}</div>
+            <div style="font-size:11px;color:var(--text-muted)">Sessions Logged</div>
+        </div>
+    </div>
 </div>
 
-<!-- Main Grid -->
-<div class="grid-2" style="margin-top:24px">
+<!-- ── Train Panel ──────────────────────────────────────────── -->
+<div class="grid-2" style="margin-bottom:24px">
+    <div class="card" style="background:linear-gradient(135deg,rgba(99,102,241,.08),rgba(249,115,22,.04))">
+        <h3 style="font-size:15px;font-weight:700;margin-bottom:16px">Train PulseMind</h3>
 
-    <!-- Column 1 -->
-    <div style="display:flex;flex-direction:column;gap:20px">
-        <div class="card ai-config-card">
-            <div class="ai-config-header">
-                <span class="ai-config-icon">🏗️</span>
-                <h3>Architecture</h3>
-            </div>
-            <div class="arch-grid">
-                <label class="arch-option"><input type="radio" name="arch" value="resnet" checked>
-                    <div class="arch-chip selected"><span class="arch-chip-name">ResNet</span><span class="arch-chip-desc">Skip-connections, anti-vanishing-gradient</span><span class="arch-badge">⭐ Recommended</span></div>
-                </label>
-                <label class="arch-option"><input type="radio" name="arch" value="mlp">
-                    <div class="arch-chip"><span class="arch-chip-name">Deep MLP</span><span class="arch-chip-desc">Classic perceptron, fast training</span></div>
-                </label>
-                <label class="arch-option"><input type="radio" name="arch" value="attention">
-                    <div class="arch-chip"><span class="arch-chip-name">AttentionNet</span><span class="arch-chip-desc">Transformer-inspired, explainable</span><span class="arch-badge badge-indigo">🔍 Explainable</span></div>
-                </label>
-                <label class="arch-option"><input type="radio" name="arch" value="ensemble">
-                    <div class="arch-chip"><span class="arch-chip-name">Ensemble</span><span class="arch-chip-desc">MLP + ResNet soft-voting</span><span class="arch-badge badge-green">🏆 Most Accurate</span></div>
-                </label>
-            </div>
+        <div style="margin-bottom:16px">
+            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Architecture</label>
+            <select id="archSelect" style="width:100%;padding:10px 12px;background:rgba(255,255,255,.08);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:14px">
+                <option value="resnet">ResNet (Recommended)</option>
+                <option value="mlp">Deep MLP</option>
+                <option value="attention">AttentionNet (Transformer)</option>
+                <option value="ensemble">Ensemble (Most Robust)</option>
+            </select>
         </div>
 
-        <div class="card" style="position:relative;overflow:hidden">
-            <div style="position:absolute;top:-20px;right:-20px;font-size:120px;opacity:0.04;pointer-events:none">🧠</div>
-            <h3 style="margin-bottom:4px">Train Neural Network</h3>
-            <p style="color:var(--text-muted);font-size:13px;margin-bottom:20px">Adam optimiser + cosine LR scheduling</p>
-            <div style="margin-bottom:20px;display:none" id="loss-chart-wrap">
-                <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.08em">Live Loss Curve</div>
-                <canvas id="lossChart" height="90"></canvas>
+        <div style="margin-bottom:20px">
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+                <label style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">Epochs</label>
+                <span id="epochVal" style="font-size:12px;color:var(--accent)">200</span>
             </div>
-            <div id="training-progress" style="margin-bottom:20px;display:none">
-                <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-secondary);margin-bottom:6px">
-                    <span>Training progress</span><span id="progress-text">0%</span>
-                </div>
-                <div class="progress-bar-wrap" style="height:6px">
-                    <div class="progress-bar-fill" id="progress-bar" style="width:0%;background:linear-gradient(90deg,var(--accent2),var(--accent))"></div>
-                </div>
-            </div>
-            <button id="btn-train" class="btn btn-primary btn-lg" style="width:100%">🚀 Train PulseMind AI</button>
-            <p style="font-size:11px;color:var(--text-muted);text-align:center;margin-top:10px">~10-30 seconds · Early stopping enabled</p>
+            <input type="range" id="epochSlider" min="50" max="500" step="50" value="200"
+                style="width:100%;accent-color:var(--accent)"
+                oninput="document.getElementById('epochVal').textContent=this.value">
         </div>
 
-        <div class="card insight-card indigo" style="cursor:pointer" id="btn-generate">
-            <div class="insight-title">✨ Generate AI Workout Plan</div>
-            <div class="insight-text">Uses trained model to create a personalised 3-day split.</div>
-            <div style="margin-top:14px;font-size:12px;color:rgba(129,140,248,.7)">Click to generate →</div>
+        <div style="margin-bottom:20px;display:flex;gap:16px">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text-secondary)">
+                <input type="checkbox" id="advCheck" checked style="accent-color:var(--accent)">
+                Adversarial Training
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text-secondary)">
+                <input type="checkbox" id="mixupCheck" checked style="accent-color:var(--accent)">
+                Mixup Augmentation
+            </label>
+        </div>
+
+        <button id="trainBtn" onclick="trainModel()" class="btn btn-primary" style="width:100%;padding:12px;font-size:15px;font-weight:700">
+            ⚡ Train PulseMind
+        </button>
+
+        <div id="trainStatus" style="display:none;margin-top:16px;padding:12px;background:rgba(255,255,255,.04);border-radius:8px;font-size:13px;color:var(--text-secondary)">
+            <div id="trainMsg">Training...</div>
+            <div id="trainProgress" style="margin-top:8px;background:rgba(255,255,255,.08);border-radius:4px;height:4px;overflow:hidden">
+                <div id="trainBar" style="height:100%;background:var(--accent);width:0%;transition:width .5s;border-radius:4px"></div>
+            </div>
         </div>
     </div>
 
-    <!-- Column 2 -->
-    <div style="display:flex;flex-direction:column;gap:20px">
-        <div class="card ai-console">
-            <div class="ai-console-header">
-                <div style="display:flex;align-items:center;gap:8px">
-                    <span class="console-dot red"></span><span class="console-dot yellow"></span><span class="console-dot green"></span>
-                    <span style="margin-left:4px;color:var(--text-muted);font-size:11px">pulsemind.training</span>
-                </div>
-                <span id="console-status" class="console-status-badge">READY</span>
-            </div>
-            <div id="console-output" class="console-body">
-                <div class="console-line"><span class="console-prompt">$</span> System initialised.</div>
-                <div class="console-line"><span class="console-prompt">$</span> Architectures: MLP · ResNet · AttentionNet · Ensemble</div>
+    <!-- Generate Plan -->
+    <div class="card">
+        <h3 style="font-size:15px;font-weight:700;margin-bottom:16px">Generate Workout Plan</h3>
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">AI creates a personalised training plan based on your workout history and exercise preferences.</p>
+
+        <div style="margin-bottom:16px">
+            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Days per week</label>
+            <div style="display:flex;gap:8px">
+                {% for d in "23456" %}
+                <button onclick="setDays({{ d }})" id="dayBtn{{ d }}"
+                    style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,.04);color:var(--text-secondary);cursor:pointer;font-weight:600;transition:.2s"
+                    {% if d == "3" %}class="day-active"{% endif %}>{{ d }}</button>
+                {% endfor %}
             </div>
         </div>
 
+        <button id="planBtn" onclick="generatePlan()" class="btn btn-secondary" style="width:100%;padding:12px" {% if not metadata.last_trained %}disabled title="Train AI first"{% endif %}>
+            🗺️ Generate Plan
+        </button>
+        <div id="planStatus" style="display:none;margin-top:12px;font-size:13px;color:var(--text-muted)">Generating...</div>
+    </div>
+</div>
+
+<!-- ── Results area (shown after training) ──────────────────── -->
+<div id="resultsArea" style="display:none">
+
+    <!-- Metrics row -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:24px" id="metricsRow"></div>
+
+    <!-- Charts -->
+    <div class="grid-2" style="margin-bottom:24px">
         <div class="card">
-            <h3 style="margin-bottom:20px">Model Metrics</h3>
-            <div class="metrics-row">
-                <div class="metric-item">
-                    <div class="metric-value" id="m-accuracy">{% if metadata and metadata.accuracy %}{{ metadata.accuracy|floatformat:1 }}%{% else %}—{% endif %}</div>
-                    <div class="metric-label">Accuracy</div>
-                </div>
-                <div class="metric-item">
-                    <div class="metric-value" id="m-samples">{% if metadata %}{{ metadata.total_training_samples }}{% else %}0{% endif %}</div>
-                    <div class="metric-label">Training Samples</div>
-                </div>
-                <div class="metric-item">
-                    <div class="metric-value accent2" id="m-version">{% if metadata %}{{ metadata.version }}{% else %}1.0{% endif %}</div>
-                    <div class="metric-label">Version</div>
-                </div>
-            </div>
+            <h3 style="font-size:14px;font-weight:700;margin-bottom:12px">Training Curves</h3>
+            <div style="height:200px"><canvas id="lossChart"></canvas></div>
         </div>
+        <div class="card">
+            <h3 style="font-size:14px;font-weight:700;margin-bottom:12px">Top-3 Accuracy</h3>
+            <div style="height:200px"><canvas id="accChart"></canvas></div>
+        </div>
+    </div>
 
-        <div class="card" id="importance-card" style="display:none">
-            <h3 style="margin-bottom:16px">🔍 Feature Importances</h3>
-            <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Which signals drive AI recommendations?</p>
-            <div id="importance-bars"></div>
-        </div>
+    <!-- Explainability -->
+    <div class="card" style="margin-bottom:24px">
+        <h3 style="font-size:14px;font-weight:700;margin-bottom:4px">Feature Explainability</h3>
+        <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">SHAP values (when available) or Integrated Gradients — which input features drive the AI's decisions most.</p>
+        <div style="height:220px"><canvas id="shapChart"></canvas></div>
+    </div>
+
+    <!-- Architecture badge -->
+    <div class="card" id="archCard">
+        <h3 style="font-size:14px;font-weight:700;margin-bottom:12px">Architecture Details</h3>
+        <div id="archLayers" style="font-size:12px;font-family:monospace;color:var(--text-secondary);line-height:1.8"></div>
     </div>
 </div>
 
-<!-- Architecture Guide -->
-<div class="card" style="margin-top:24px">
-    <h3 style="margin-bottom:16px">📐 Architecture Guide</h3>
-    <div class="grid-3">
-        <div class="arch-info-card"><div class="arch-info-icon">🧱</div><div class="arch-info-name">Deep MLP</div><div class="arch-info-desc">Classic perceptron with He init, LayerNorm, Dropout. Best for quick experimentation.</div></div>
-        <div class="arch-info-card"><div class="arch-info-icon">🔗</div><div class="arch-info-name">ResNet</div><div class="arch-info-desc">Skip-connections eliminate vanishing gradients. Default choice.</div></div>
-        <div class="arch-info-card"><div class="arch-info-icon">👁️</div><div class="arch-info-name">AttentionNet</div><div class="arch-info-desc">Transformer-inspired attention over input features.</div></div>
-    </div>
-</div>
+<!-- ── Generated Plan (shown after planning) ────────────────── -->
+<div id="planArea" style="display:none;margin-top:24px"></div>
 
+<style>
+.day-active { background:var(--accent) !important; color:#fff !important; border-color:var(--accent) !important; }
+@keyframes statusPulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+</style>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-var co=document.getElementById('console-output'),cs=document.getElementById('console-status'),sd=document.getElementById('status-dot'),sl=document.getElementById('status-label'),sa=document.getElementById('status-acc');
-document.querySelectorAll('input[name="arch"]').forEach(function(r){r.addEventListener('change',function(){document.querySelectorAll('.arch-chip').forEach(function(c){c.classList.remove('selected')});this.closest('.arch-option').querySelector('.arch-chip').classList.add('selected')})});
-function log(t,c){var d=document.createElement('div');d.className='console-line'+(c?' '+c:'');d.innerHTML='<span class="console-prompt">$</span> ['+new Date().toLocaleTimeString()+'] '+t;co.appendChild(d);co.scrollTop=co.scrollHeight}
-function setS(l,c){cs.textContent=l;cs.className='console-status-badge '+c;sd.className='ai-status-dot '+(c==='ok'?'active':c==='err'?'error':'busy')}
-var lc=null;
-function initLC(){var x=document.getElementById('lossChart').getContext('2d');document.getElementById('loss-chart-wrap').style.display='block';if(lc)lc.destroy();lc=new Chart(x,{type:'line',data:{labels:[],datasets:[{label:'Train',data:[],borderColor:'#f97316',borderWidth:2,pointRadius:0,fill:false,tension:.4},{label:'Val',data:[],borderColor:'#6366f1',borderWidth:2,pointRadius:0,fill:false,tension:.4}]},options:{animation:{duration:0},plugins:{legend:{labels:{color:'#94a3b8',font:{size:11}}}},scales:{x:{display:false},y:{ticks:{color:'#94a3b8',font:{size:11}},grid:{color:'rgba(255,255,255,.05)'}}}}})}
-function addLP(t,v,e){if(!lc)return;lc.data.labels.push(e);lc.data.datasets[0].data.push(t);lc.data.datasets[1].data.push(v);lc.update()}
-document.getElementById('btn-train').addEventListener('click',async function(){var a=document.querySelector('input[name="arch"]:checked').value||'resnet',b=this;b.disabled=true;b.innerHTML='<span class="glow-pulse">⏳ Training…</span>';setS('TRAINING','busy');document.getElementById('training-progress').style.display='block';initLC();log('Initialising PulseMind-'+a.toUpperCase()+'…','info');log('Extracting features…');var t=0,pb=document.getElementById('progress-bar'),pt=document.getElementById('progress-text');var fp=setInterval(function(){t=Math.min(t+2,88);pb.style.width=t+'%';pt.textContent=t+'%';if(t%20===0){var fl=(1.5*Math.exp(-t/40)).toFixed(4);addLP(parseFloat(fl),parseFloat(fl)*1.1,t);log('Epoch '+(t*5)+'/100 loss='+fl,'dim')}},300);try{var r=await fetch('/api/train/',{method:'GET'});var d=await r.json();clearInterval(fp);if(r.ok){pb.style.width='100%';pt.textContent='100%';addLP(d.loss,d.loss*1.05,100);log('✅ Done! Loss: '+d.loss.toFixed(6),'ok');log('📊 Accuracy: '+(d.accuracy||0)+'%','ok');log('💾 '+d.samples+' samples saved','ok');setS('HEALTHY','ok');sl.textContent='Model Active — PulseMind-'+a.toUpperCase();sa.innerHTML='Accuracy: <strong>'+(d.accuracy||'—')+'%</strong>';document.getElementById('m-accuracy').textContent=(d.accuracy||'—')+'%';document.getElementById('m-samples').textContent=d.samples;showImp()}else{log('❌ '+d.error,'err');setS('ERROR','err')}}catch(e){clearInterval(fp);log('💥 Connection lost.','err');setS('ERROR','err')}b.disabled=false;b.innerHTML='🚀 Re-Train PulseMind AI'});
-document.getElementById('btn-generate').addEventListener('click',async function(){log('📡 Loading weights…','info');try{var r=await fetch('/api/generate-plan/');var d=await r.json();if(r.ok){log('✅ Plan "'+d.plan_title+'" generated!','ok');setTimeout(function(){window.location.href='/plans/'+d.plan_id+'/'},1500)}else{log('❌ '+d.error,'err')}}catch(e){log('💥 Unreachable.','err')}});
-var FN=['Session Volume','Total Sets','Unique Exercises','Avg Weight','Max Weight','Avg Reps','Max Reps','Avg 1RM','Best 1RM','Compound Ratio','Chest %','Back %','Legs %','Shoulder %','Arms %','Core %','Rest Days','Sessions/Month'];
-function showImp(){var c=document.getElementById('importance-card'),b=document.getElementById('importance-bars');c.style.display='block';var r=[.18,.09,.07,.12,.14,.06,.04,.11,.13,.08,.03,.05,.04,.03,.02,.02,.10,.07],s=r.reduce(function(a,b){return a+b},0);var items=r.map(function(v,i){return{v:v/s,n:FN[i]}}).sort(function(a,b){return b.v-a.v}).slice(0,8);b.innerHTML=items.map(function(d){return'<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-secondary);margin-bottom:4px"><span>'+d.n+'</span><span style="color:var(--accent-light)">'+(d.v*100).toFixed(1)+'%</span></div><div class="progress-bar-wrap" style="height:5px"><div class="progress-bar-fill" style="width:'+(d.v*100*3)+'%;background:linear-gradient(90deg,var(--accent2),var(--accent))"></div></div></div>'}).join('')}
+let selectedDays = 3;
+let lossChart, accChart, shapChart;
+
+function setDays(d) {
+    selectedDays = d;
+    document.querySelectorAll('[id^=dayBtn]').forEach(b => b.classList.remove('day-active'));
+    document.getElementById('dayBtn' + d).classList.add('day-active');
+}
+
+async function trainModel() {
+    const arch    = document.getElementById('archSelect').value;
+    const epochs  = document.getElementById('epochSlider').value;
+    const adv     = document.getElementById('advCheck').checked;
+    const mixup   = document.getElementById('mixupCheck').checked;
+
+    const btn  = document.getElementById('trainBtn');
+    const stat = document.getElementById('trainStatus');
+    const msg  = document.getElementById('trainMsg');
+    const bar  = document.getElementById('trainBar');
+
+    btn.disabled = true;
+    btn.textContent = '⏳ Training...';
+    stat.style.display = 'block';
+    document.getElementById('resultsArea').style.display = 'none';
+
+    // Animate progress bar (estimating duration)
+    let pct = 0;
+    const maxPct = 90;
+    const interval = setInterval(() => {
+        if (pct < maxPct) { pct += 1; bar.style.width = pct + '%'; }
+    }, epochs * 10 / maxPct);
+
+    const tags = [adv ? '🛡️ adversarial' : '', mixup ? '🔀 mixup' : ''].filter(Boolean).join(', ');
+    msg.textContent = `Training ${arch.toUpperCase()} · ${epochs} epochs · ${tags || 'standard'}`;
+
+    try {
+        const url = `/api/ai/train/?arch=${arch}&epochs=${epochs}&adversarial=${adv}&mixup=${mixup}`;
+        const r   = await fetch(url);
+        const d   = await r.json();
+
+        clearInterval(interval);
+        bar.style.width = '100%';
+
+        if (!r.ok || d.error) {
+            msg.textContent = '❌ ' + (d.error || 'Training failed');
+            btn.disabled = false;
+            btn.textContent = '⚡ Train PulseMind';
+            return;
+        }
+
+        msg.textContent = `✅ Done in ${d.duration}s — Test accuracy: ${d.test_accuracy}%`;
+        showResults(d);
+
+    } catch (e) {
+        clearInterval(interval);
+        msg.textContent = '❌ Network error: ' + e.message;
+    }
+
+    btn.disabled = false;
+    btn.textContent = '⚡ Train PulseMind';
+    document.getElementById('planBtn').disabled = false;
+}
+
+function showResults(d) {
+    document.getElementById('resultsArea').style.display = 'block';
+
+    // Metric cards
+    const metrics = [
+        { label: 'Val Accuracy',  value: d.val_accuracy + '%',  color: 'var(--accent)' },
+        { label: 'Test Accuracy', value: d.test_accuracy + '%', color: '#4ade80' },
+        { label: 'Best Epoch',    value: d.best_epoch,           color: '#6366f1' },
+        { label: 'Duration',      value: d.duration + 's',       color: '#facc15' },
+        { label: 'Train Samples', value: d.n_train,              color: 'var(--text-secondary)' },
+    ];
+    document.getElementById('metricsRow').innerHTML = metrics.map(m =>
+        `<div class="card" style="padding:16px;text-align:center">
+            <div style="font-size:24px;font-weight:800;color:${m.color}">${m.value}</div>
+            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-top:4px">${m.label}</div>
+        </div>`
+    ).join('');
+
+    // Loss chart
+    const h = d.history;
+    const labels = h.train_loss.map((_, i) => i);
+
+    if (lossChart) lossChart.destroy();
+    lossChart = new Chart(document.getElementById('lossChart'), {
+        type: 'line',
+        data: { labels,
+            datasets: [
+                { label: 'Train', data: h.train_loss, borderColor: '#f97316', borderWidth: 1.5, tension: 0.3, pointRadius: 0 },
+                { label: 'Val',   data: h.val_loss,   borderColor: '#6366f1', borderWidth: 1.5, tension: 0.3, pointRadius: 0 },
+                { label: 'Adv',   data: h.adv_loss,   borderColor: '#ef4444', borderWidth: 1,   tension: 0.3, pointRadius: 0, borderDash: [4,4] },
+            ]
+        },
+        options: { responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: '#94a3b8', font: { size: 11 } } } },
+            scales: { y: { ticks: { color: '#64748b' }, grid: { color: 'rgba(255,255,255,.04)' } },
+                      x: { ticks: { color: '#64748b', maxTicksLimit: 8 }, grid: { display: false } } }
+        }
+    });
+
+    // Accuracy chart
+    if (accChart) accChart.destroy();
+    accChart = new Chart(document.getElementById('accChart'), {
+        type: 'line',
+        data: { labels, datasets: [{ label: 'Top-3 Acc', data: h.accuracy, borderColor: '#4ade80', borderWidth: 2, tension: 0.3, fill: true, backgroundColor: 'rgba(74,222,128,.08)', pointRadius: 0 }] },
+        options: { responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                y: { min: 0, max: 1, ticks: { color: '#64748b', callback: v => (v*100).toFixed(0)+'%' }, grid: { color: 'rgba(255,255,255,.04)' } },
+                x: { ticks: { color: '#64748b', maxTicksLimit: 8 }, grid: { display: false } }
+            }
+        }
+    });
+
+    // SHAP / IG explainability chart
+    const explValues = d.shap_values || d.ig_values;
+    const featureNames = d.feature_names || [];
+    if (explValues && featureNames.length) {
+        const paired = featureNames.map((n, i) => [n, explValues[i] || 0]);
+        paired.sort((a, b) => b[1] - a[1]);
+        const method = d.shap_values ? 'SHAP' : 'Integrated Gradients';
+
+        if (shapChart) shapChart.destroy();
+        shapChart = new Chart(document.getElementById('shapChart'), {
+            type: 'bar',
+            data: {
+                labels: paired.map(p => p[0]),
+                datasets: [{ label: method + ' Attribution', data: paired.map(p => p[1]),
+                    backgroundColor: paired.map((_, i) => `hsla(${220 + i * 12},70%,60%,0.7)`),
+                    borderWidth: 0, borderRadius: 4 }]
+            },
+            options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false },
+                    title: { display: true, text: method + ' Feature Attribution', color: '#94a3b8', font: { size: 11 } } },
+                scales: { x: { ticks: { color: '#64748b' }, grid: { color: 'rgba(255,255,255,.04)' } },
+                          y: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { display: false } } }
+            }
+        });
+    }
+
+    // Architecture layers
+    if (d.arch_info && d.arch_info.layers) {
+        document.getElementById('archLayers').innerHTML =
+            `<strong style="color:var(--accent)">${d.arch_info.architecture?.toUpperCase()}</strong> — ` +
+            `${d.arch_info.total_params?.toLocaleString()} params<br><br>` +
+            d.arch_info.layers.map(l => {
+                let detail = l.type;
+                if (l.in && l.out) detail += ` (${l.in} → ${l.out})`;
+                else if (l.out) detail += ` (→ ${l.out})`;
+                return `<span style="color:var(--text-muted)">  ${(l.name||'').padEnd(22, ' ')}</span><span style="color:var(--text-primary)">${detail}</span>`;
+            }).join('<br>');
+        document.getElementById('archCard').style.display = 'block';
+    }
+}
+
+async function generatePlan() {
+    const btn = document.getElementById('planBtn');
+    const stat = document.getElementById('planStatus');
+    btn.disabled = true;
+    stat.style.display = 'block';
+    stat.textContent = '🧠 Generating personalised plan...';
+
+    try {
+        const r = await fetch(`/api/ai/generate-plan/?days=${selectedDays}`);
+        const d = await r.json();
+        if (!r.ok || d.error) { stat.textContent = '❌ ' + (d.error || 'Failed'); btn.disabled = false; return; }
+        renderPlan(d);
+        stat.style.display = 'none';
+    } catch(e) {
+        stat.textContent = '❌ ' + e.message;
+    }
+    btn.disabled = false;
+}
+
+function renderPlan(data) {
+    const area = document.getElementById('planArea');
+    area.style.display = 'block';
+    const days = data.days || [];
+    area.innerHTML = `
+        <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+                <h3 style="font-size:16px;font-weight:700">🗺️ ${data.title || 'AI Workout Plan'}</h3>
+                <span style="font-size:12px;color:var(--text-muted)">${selectedDays} days/week &middot; ${data.focus || 'Balanced'}</span>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px">
+                ${days.map(day => `
+                    <div style="background:rgba(255,255,255,.03);border-radius:10px;padding:16px">
+                        <div style="font-weight:700;color:var(--accent);margin-bottom:10px;font-size:13px;text-transform:uppercase;letter-spacing:.05em">${day.name}</div>
+                        ${(day.exercises || []).map(ex => `
+                            <div style="margin-bottom:8px">
+                                <div style="font-size:13px;color:var(--text-primary);font-weight:600">${ex.name}</div>
+                                <div style="font-size:11px;color:var(--text-muted)">${ex.sets} sets &times; ${ex.reps} reps${ex.target_weight ? ' @ ' + ex.target_weight + 'kg' : ''}</div>
+                            </div>`).join('')}
+                    </div>`).join('')}
+            </div>
+        </div>`;
+    area.scrollIntoView({ behavior: 'smooth' });
+}
 </script>
-<style>
-.ai-status-banner{display:flex;align-items:center;gap:16px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 20px;font-size:13px}
-.ai-status-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;background:var(--text-muted)}
-.ai-status-dot.active{background:var(--success);box-shadow:0 0 8px var(--success);animation:pd 2s infinite}
-.ai-status-dot.busy{background:var(--accent);box-shadow:0 0 8px var(--accent);animation:pd 1s infinite}
-.ai-status-dot.error{background:var(--danger)}
-@keyframes pd{0%,100%{opacity:1}50%{opacity:.4}}
-.ai-status-sep{color:var(--text-muted)}.ai-status-meta{color:var(--text-secondary)}
-.ai-config-card{padding:20px}.ai-config-header{display:flex;align-items:center;gap:10px;margin-bottom:16px}.ai-config-header h3{margin:0}.ai-config-icon{font-size:20px}
-.arch-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.arch-option{cursor:pointer}.arch-option input[type=radio]{display:none}
-.arch-chip{border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;transition:all .2s;cursor:pointer;background:rgba(255,255,255,.02)}
-.arch-chip:hover{border-color:rgba(255,255,255,.18);background:rgba(255,255,255,.05)}
-.arch-chip.selected{border-color:var(--accent);background:rgba(249,115,22,.08)}
-.arch-chip-name{display:block;font-weight:700;font-size:14px;color:var(--text-primary);margin-bottom:4px}
-.arch-chip-desc{display:block;font-size:11px;color:var(--text-muted);line-height:1.5}
-.arch-badge{display:inline-block;margin-top:6px;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700;background:rgba(249,115,22,.15);color:var(--accent-light)}
-.arch-badge.badge-indigo{background:rgba(99,102,241,.15);color:#818cf8}.arch-badge.badge-green{background:rgba(34,197,94,.15);color:#4ade80}
-.ai-console{background:#070809;border-color:rgba(255,255,255,.06);font-family:'Cascadia Code','Fira Code',monospace;padding:0}
-.ai-console-header{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-bottom:1px solid rgba(255,255,255,.06)}
-.console-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}.console-dot.red{background:#ff5f57}.console-dot.yellow{background:#febc2e}.console-dot.green{background:#28c840}
-.console-body{font-size:12px;line-height:1.7;padding:14px 16px;height:220px;overflow-y:auto;color:#94a3b8}
-.console-body::-webkit-scrollbar{width:4px}.console-body::-webkit-scrollbar-thumb{background:#222;border-radius:4px}
-.console-line{display:flex;gap:8px}.console-line.info{color:#67e8f9}.console-line.ok{color:#4ade80}.console-line.err{color:#f87171}.console-line.dim{color:#4b5563}
-.console-prompt{color:#f97316;user-select:none}
-.console-status-badge{font-size:10px;font-weight:800;letter-spacing:.1em;padding:2px 8px;border-radius:20px;text-transform:uppercase;background:rgba(75,85,99,.3);color:#6b7280}
-.console-status-badge.ok{background:rgba(34,197,94,.15);color:#4ade80}.console-status-badge.err{background:rgba(239,68,68,.15);color:#f87171}
-.console-status-badge.busy{background:rgba(249,115,22,.15);color:#fb923c;animation:pd 1s infinite}
-.metrics-row{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.metric-item{text-align:center}
-.metric-value{font-family:'Outfit',sans-serif;font-size:28px;font-weight:800;color:var(--accent)}.metric-value.accent2{color:var(--accent2)}
-.metric-label{font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-top:2px}
-.arch-info-card{border:1px solid var(--border);border-radius:10px;padding:16px;transition:all .2s}
-.arch-info-card:hover{border-color:rgba(255,255,255,.12);background:rgba(255,255,255,.02)}
-.arch-info-icon{font-size:28px;margin-bottom:8px}.arch-info-name{font-weight:700;font-size:15px;color:var(--text-primary);margin-bottom:6px}
-.arch-info-desc{font-size:12px;color:var(--text-muted);line-height:1.6}
-.glow-pulse{animation:gp 1s ease-in-out infinite;display:inline-block}
-@keyframes gp{0%,100%{opacity:1}50%{opacity:.5}}
-</style>
 {% endblock %}

@@ -23,8 +23,7 @@
         </div>
         <h3 style="font-size:16px;font-weight:700;color:var(--text-primary);margin-bottom:8px">{{ goal.title }}</h3>
         {% if goal.description %}
-        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;line-height:1.5">{{
-            goal.description|truncatechars:80 }}</p>
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;line-height:1.5">{{ goal.description|truncatechars:80 }}</p>
         {% endif %}
 
         {% if goal.target_value %}

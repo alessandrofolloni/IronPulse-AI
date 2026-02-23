@@ -1,622 +1,688 @@
 """
-IronPulse — PulseMind Trainer
-==============================
-Provides optimisers, loss functions, LR schedulers, early stopping,
-and training loops — all compatible with every PulseMind architecture.
-
-Optimisers
-----------
-  SGDMomentum  : SGD with configurable momentum and weight decay
-  Adam         : Adaptive moment estimation (default, recommended)
-
-Schedulers
-----------
-  StepLR       : Reduce LR by factor γ every step_size epochs
-  CosineAnnealingLR : Smooth cosine decay from η_max to η_min
-
-Usage
------
-    from core.ai.engine import build_model
-    from core.ai.trainer import PulseMindTrainer, prepare_workout_data
-
-    model = build_model('resnet', input_size=18, output_size=10)
-    trainer = PulseMindTrainer(model, optimiser='adam', lr=1e-3, use_wandb=True)
-    history = trainer.fit(X_train, y_train, X_val, y_val, epochs=200)
+IronPulse — PulseMind Trainer v2 (PyTorch)
+===========================================
+Production training pipeline with:
+  • AdamW optimiser + cosine LR with warm restarts
+  • Early stopping with best-checkpoint restoration
+  • Train / Validation / Test split (70/15/15)
+  • Mini-batch gradient descent
+  • Adversarial training (FGSM + Mixup augmentation)
+  • SHAP-based explainability
+  • W&B experiment tracking
+  • Feature extraction from real workout history
+  • Progressive overload analysis
 """
 
-import numpy as np
 import logging
-from typing import Optional, Dict, Any, List
+import time
+import copy
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+
+try:
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+    import torch.optim as optim
+    from torch.utils.data import DataLoader, TensorDataset
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
+
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+
+try:
+    import shap
+    SHAP_AVAILABLE = True
+except ImportError:
+    SHAP_AVAILABLE = False
+
+from .engine import N_FEATURES, FEATURE_NAMES, build_model
 
 logger = logging.getLogger(__name__)
 
-# ── Optional W&B ──────────────────────────────────────────────────────────────
-try:
-    import wandb
-    _WANDB_AVAILABLE = True
-except ImportError:
-    _WANDB_AVAILABLE = False
-    logger.warning("wandb not installed — W&B logging disabled. Run: pip install wandb")
-
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Optimisers
+# Feature Extraction
 # ══════════════════════════════════════════════════════════════════════════════
 
-class SGDMomentum:
-    """Classical SGD with Nesterov-style momentum and L2 weight decay."""
-
-    def __init__(self, lr=0.01, momentum=0.9, weight_decay=1e-4):
-        self.lr           = lr
-        self.momentum     = momentum
-        self.weight_decay = weight_decay
-        self._velocities  = {}   # id(param) → velocity
-
-    def step(self, params_and_grads):
-        """
-        params_and_grads : list of (W_ref, b_ref, dW, db) tuples
-                           where W_ref / b_ref are the *model's own arrays*
-                           (we update them in-place).
-        """
-        for (W, b, dW, db) in params_and_grads:
-            for param, grad in [(W, dW), (b, db)]:
-                pid = id(param)
-                if pid not in self._velocities:
-                    self._velocities[pid] = np.zeros_like(param)
-                v = self._velocities[pid]
-                grad_reg = grad + self.weight_decay * param
-                v[:] = self.momentum * v - self.lr * grad_reg
-                param += v
-                self._velocities[pid] = v
-
-
-class Adam:
+def prepare_workout_data(sessions, exercises) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Adam optimiser.
-    References: Kingma & Ba, 2014 (https://arxiv.org/abs/1412.6980)
+    Extract feature matrix X and label matrix y from real workout sessions.
 
-    Computes adaptive learning rates using:
-        m̂  = m  / (1 - β₁ᵗ)   — bias-corrected 1st moment
-        v̂  = v  / (1 - β₂ᵗ)   — bias-corrected 2nd moment
-        θ  = θ  - α * m̂ / (√v̂ + ε)
+    X shape: (n_samples, N_FEATURES=18)
+    y shape: (n_samples, n_exercises) — soft probability distribution
 
-    Generally the best default choice for neural networks.
+    Uses real data only. If fewer than 20 real samples exist, generates
+    minimal synthetic augmentation to ensure the model can initialise.
     """
+    exercise_list = list(exercises.order_by('id'))
+    n_exercises = len(exercise_list)
 
-    def __init__(self, lr=1e-3, beta1=0.9, beta2=0.999, eps=1e-8, weight_decay=1e-4):
-        self.lr           = lr
-        self.beta1        = beta1
-        self.beta2        = beta2
-        self.eps          = eps
-        self.weight_decay = weight_decay
-        self._m   = {}   # 1st moment
-        self._v   = {}   # 2nd moment
-        self._t   = 0    # step counter
+    if n_exercises == 0:
+        return np.empty((0, N_FEATURES), dtype=np.float32), np.empty((0, 1), dtype=np.float32)
 
-    def step(self, params_and_grads):
-        self._t += 1
-        bc1 = 1 - self.beta1 ** self._t
-        bc2 = 1 - self.beta2 ** self._t
+    exercise_idx = {ex.id: i for i, ex in enumerate(exercise_list)}
 
-        for (W, b, dW, db) in params_and_grads:
-            for param, grad in [(W, dW), (b, db)]:
-                pid = id(param)
-                if pid not in self._m:
-                    self._m[pid] = np.zeros_like(param)
-                    self._v[pid] = np.zeros_like(param)
+    X_list, y_list = [], []
+    MUSCLE_ORDER = ['chest', 'back', 'legs', 'shoulders', 'arms', 'core']
 
-                grad_reg = grad + self.weight_decay * param
-                self._m[pid] = self.beta1 * self._m[pid] + (1 - self.beta1) * grad_reg
-                self._v[pid] = self.beta2 * self._v[pid] + (1 - self.beta2) * grad_reg ** 2
+    for session in sessions:
+        sets = list(session.sets.select_related('exercise').all())
+        if not sets:
+            continue
 
-                m_hat = self._m[pid] / bc1
-                v_hat = self._v[pid] / bc2
-                param -= self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
+        weights    = [s.weight for s in sets if s.weight]
+        reps       = [s.reps for s in sets if s.reps]
+        one_rms    = [s.one_rm for s in sets if s.one_rm]
 
+        if not weights:
+            continue
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Learning-Rate Schedulers
-# ══════════════════════════════════════════════════════════════════════════════
+        vol   = sum(s.weight * s.reps for s in sets if s.weight and s.reps)
+        n_sets = len(sets)
+        unique = len({s.exercise_id for s in sets})
 
-class StepLR:
-    """Reduce LR by factor gamma every step_size epochs."""
-    def __init__(self, optimiser, step_size=50, gamma=0.5):
-        self.opt       = optimiser
-        self.step_size = step_size
-        self.gamma     = gamma
-        self._base_lr  = optimiser.lr
+        avg_w = np.mean(weights) if weights else 0
+        max_w = np.max(weights)  if weights else 0
+        avg_r = np.mean(reps)    if reps else 0
+        max_r = np.max(reps)     if reps else 0
+        avg_1 = np.mean(one_rms) if one_rms else 0
+        best_1= np.max(one_rms)  if one_rms else 0
 
-    def step(self, epoch):
-        if epoch > 0 and epoch % self.step_size == 0:
-            self.opt.lr *= self.gamma
-            logger.debug(f"StepLR: lr reduced to {self.opt.lr:.6f}")
-        return self.opt.lr
+        compound = sum(1 for s in sets if s.exercise.is_compound)
+        comp_ratio = compound / n_sets if n_sets else 0
 
+        # Muscle group volume distribution
+        mg_vol = {mg: 0.0 for mg in MUSCLE_ORDER}
+        for s in sets:
+            mg = s.exercise.muscle_group
+            mapped = mg if mg in mg_vol else 'core'
+            if mg in ('biceps', 'triceps'):
+                mapped = 'arms'
+            mg_vol[mapped] = mg_vol.get(mapped, 0) + (s.weight * s.reps if s.weight and s.reps else 0)
 
-class CosineAnnealingLR:
-    """Smooth cosine annealing: η = η_min + 0.5*(η_max-η_min)*(1 + cos(πt/T))"""
-    def __init__(self, optimiser, T_max, eta_min=1e-6):
-        self.opt      = optimiser
-        self.T_max    = T_max
-        self.eta_min  = eta_min
-        self.eta_max  = optimiser.lr
+        total_vol = sum(mg_vol.values()) or 1.0
+        mg_pct = [mg_vol[mg] / total_vol for mg in MUSCLE_ORDER]
 
-    def step(self, epoch):
-        new_lr = self.eta_min + 0.5 * (self.eta_max - self.eta_min) * (
-            1 + np.cos(np.pi * epoch / self.T_max)
-        )
-        self.opt.lr = new_lr
-        return new_lr
+        # Temporal features
+        from django.utils import timezone
+        from datetime import timedelta
+        today = timezone.now().date()
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Loss Functions
-# ══════════════════════════════════════════════════════════════════════════════
-
-def cross_entropy_loss(y_pred, y_true):
-    """Multinomial cross-entropy. y_true: one-hot."""
-    m = y_pred.shape[0]
-    loss = -np.sum(y_true * np.log(np.clip(y_pred, 1e-9, 1.0))) / m
-    grad = (y_pred - y_true) / m
-    return loss, grad
-
-
-def mse_loss(y_pred, y_true):
-    """Mean squared error for regression."""
-    m = y_pred.shape[0]
-    diff = y_pred - y_true
-    loss = np.mean(diff ** 2)
-    grad = 2 * diff / m
-    return loss, grad
-
-
-def huber_loss(y_pred, y_true, delta=1.0):
-    """Huber loss: L1-smooth, more robust to outliers than MSE."""
-    diff = y_pred - y_true
-    abs_diff = np.abs(diff)
-    loss = np.where(abs_diff <= delta, 0.5 * diff ** 2, delta * (abs_diff - 0.5 * delta))
-    loss = loss.mean()
-    grad = np.where(abs_diff <= delta, diff, delta * np.sign(diff)) / y_pred.shape[0]
-    return loss, grad
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Early Stopping
-# ══════════════════════════════════════════════════════════════════════════════
-
-class EarlyStopping:
-    """
-    Stop training if monitored metric hasn't improved in `patience` epochs.
-    Also stores the best weights seen so far (checkpointing).
-    """
-
-    def __init__(self, patience=20, min_delta=1e-4, restore_best=True):
-        self.patience     = patience
-        self.min_delta    = min_delta
-        self.restore_best = restore_best
-        self._best_loss   = np.inf
-        self._counter     = 0
-        self._best_params = None
-
-    def step(self, val_loss, model):
-        if val_loss < self._best_loss - self.min_delta:
-            self._best_loss   = val_loss
-            self._counter     = 0
-            self._best_params = model.get_parameters()
+        # Days since this session (rest_days proxy)
+        if hasattr(session.date, 'date'):
+            sess_date = session.date.date()
         else:
-            self._counter += 1
+            sess_date = session.date
+        days_ago = (today - sess_date).days
 
-        if self._counter >= self.patience:
-            if self.restore_best and self._best_params:
-                model.load_from_dict(self._best_params)
-            return True   # signal to stop
-        return False
+        # Monthly frequency context
+        from_date = sess_date - timedelta(days=30)
+        monthly_freq = sessions.filter(date__gte=from_date, date__lte=sess_date).count()
+
+        feature = [
+            float(vol) / 10000.0,     # normalise volume to ~[0,1] range
+            float(n_sets) / 30.0,
+            float(unique) / 15.0,
+            float(avg_w) / 200.0,
+            float(max_w) / 300.0,
+            float(avg_r) / 20.0,
+            float(max_r) / 30.0,
+            float(avg_1) / 300.0,
+            float(best_1) / 400.0,
+            float(comp_ratio),
+        ] + mg_pct + [
+            float(days_ago) / 30.0,
+            float(monthly_freq) / 30.0,
+        ]
+
+        X_list.append(feature[:N_FEATURES])
+
+        # Build label from exercises done in this session (soft target)
+        label = np.zeros(n_exercises, dtype=np.float32)
+        for s in sets:
+            if s.exercise_id in exercise_idx:
+                # Weight by volume (heavier sets → higher label weight)
+                vol_weight = (s.weight * s.reps) if s.weight and s.reps else 1.0
+                label[exercise_idx[s.exercise_id]] += vol_weight
+
+        if label.sum() > 0:
+            label = label / label.sum()
+        y_list.append(label)
+
+    # Build arrays — handle empty case correctly
+    if len(X_list) > 0:
+        X = np.array(X_list, dtype=np.float32)
+        y = np.array(y_list, dtype=np.float32)
+    else:
+        X = np.empty((0, N_FEATURES), dtype=np.float32)
+        y = np.empty((0, n_exercises), dtype=np.float32)
+
+    # Only augment with synthetic data if truly data-scarce (< 20 real samples)
+    # The synthetic data is exercise-aware (not pure random noise)
+    if len(X) < 20:
+        n_synth = max(50 - len(X), 30)
+        logger.warning(
+            f"Only {len(X)} real sessions found. Generating {n_synth} "
+            "synthetic samples. The more workouts you log, the better the AI."
+        )
+        rng = np.random.default_rng(42)
+
+        # Synthetic data based on realistic workout distributions
+        X_synth = np.zeros((n_synth, N_FEATURES), dtype=np.float32)
+        X_synth[:, 0] = rng.uniform(0.2, 0.8, n_synth)   # volume
+        X_synth[:, 1] = rng.uniform(0.1, 0.8, n_synth)   # sets
+        X_synth[:, 2] = rng.uniform(0.07, 0.4, n_synth)  # unique exercises
+        X_synth[:, 3] = rng.uniform(0.2, 0.6, n_synth)   # avg weight
+        X_synth[:, 4] = rng.uniform(0.3, 0.8, n_synth)   # max weight
+        X_synth[:, 5] = rng.uniform(0.3, 0.7, n_synth)   # avg reps
+        X_synth[:, 6] = rng.uniform(0.4, 0.8, n_synth)   # max reps
+        X_synth[:, 7] = rng.uniform(0.2, 0.7, n_synth)   # avg 1RM
+        X_synth[:, 8] = rng.uniform(0.3, 0.8, n_synth)   # best 1RM
+        X_synth[:, 9] = rng.uniform(0.3, 0.8, n_synth)   # compound ratio
+
+        # Muscle group percentages (sum to 1)
+        mg_raw = rng.dirichlet(np.ones(6) * 2, n_synth)  # Dirichlet for realistic distribution
+        X_synth[:, 10:16] = mg_raw.astype(np.float32)
+
+        X_synth[:, 16] = rng.uniform(0, 0.5, n_synth)    # rest days
+        X_synth[:, 17] = rng.uniform(0.1, 0.5, n_synth)  # monthly freq
+
+        # Synthetic labels — prefer popular exercises
+        y_synth = np.zeros((n_synth, n_exercises), dtype=np.float32)
+        for i in range(n_synth):
+            n_picks = min(rng.integers(3, 8), n_exercises)
+            picks = rng.choice(n_exercises, size=n_picks, replace=False)
+            weights_synth = rng.dirichlet(np.ones(n_picks))
+            y_synth[i, picks] = weights_synth
+
+        if len(X) > 0:
+            X = np.vstack([X, X_synth])
+            y = np.vstack([y, y_synth])
+        else:
+            X = X_synth
+            y = y_synth
+
+    return X, y
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Main Trainer
+# Adversarial Training Utilities
+# ══════════════════════════════════════════════════════════════════════════════
+
+def fgsm_attack(model: 'nn.Module', X: 'torch.Tensor', y: 'torch.Tensor',
+                epsilon: float = 0.05) -> 'torch.Tensor':
+    """
+    Fast Gradient Sign Method (FGSM) adversarial perturbation.
+    Perturbs inputs in the direction that maximises loss, making the
+    model more robust to noisy/outlier workout data.
+
+    Reference: Goodfellow et al. (2014) "Explaining and Harnessing Adversarial Examples"
+    """
+    X_adv = X.clone().requires_grad_(True)
+    output = model(X_adv)
+    loss = F.kl_div(output, y, reduction='batchmean')
+    loss.backward()
+    with torch.no_grad():
+        X_adv = X_adv + epsilon * X_adv.grad.sign()
+        # Clip to keep in valid feature range [0, ~2] (normalised features)
+        X_adv = torch.clamp(X_adv, 0.0, 2.0)
+    return X_adv.detach()
+
+
+def mixup_batch(X: 'torch.Tensor', y: 'torch.Tensor',
+                alpha: float = 0.2) -> Tuple['torch.Tensor', 'torch.Tensor']:
+    """
+    Mixup data augmentation: linearly interpolate between random pairs.
+    Creates virtual training examples that regularise the decision boundary.
+
+    Reference: Zhang et al. (2017) "mixup: Beyond Empirical Risk Minimization"
+    """
+    batch_size = X.size(0)
+    lam = np.random.beta(alpha, alpha)
+    idx = torch.randperm(batch_size)
+    X_mix = lam * X + (1 - lam) * X[idx]
+    y_mix = lam * y + (1 - lam) * y[idx]
+    return X_mix, y_mix
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SHAP Explainability
+# ══════════════════════════════════════════════════════════════════════════════
+
+def compute_shap_values(model: 'nn.Module',
+                        X_background: np.ndarray,
+                        X_explain: np.ndarray) -> Optional[np.ndarray]:
+    """
+    Compute SHAP DeepExplainer values for feature attribution.
+
+    Returns array of shape (n_samples, n_features) with SHAP values,
+    or gradient-based fallback if SHAP is not installed.
+
+    Reference: Lundberg & Lee (2017) "A Unified Approach to Interpreting Model Predictions"
+    """
+    if not TORCH_AVAILABLE:
+        return None
+
+    model.eval()
+    X_bg_t = torch.tensor(X_background[:min(50, len(X_background))], dtype=torch.float32)
+    X_exp_t = torch.tensor(X_explain[:min(20, len(X_explain))], dtype=torch.float32)
+
+    if SHAP_AVAILABLE:
+        try:
+            # Wrap model for SHAP (sum over output classes for global explanation)
+            class ModelWrapper(nn.Module):
+                def __init__(self, m):
+                    super().__init__()
+                    self.m = m
+                def forward(self, x):
+                    return self.m(x).exp().sum(dim=-1, keepdim=True)
+
+            wrapper = ModelWrapper(model)
+            explainer = shap.DeepExplainer(wrapper, X_bg_t)
+            shap_vals = explainer.shap_values(X_exp_t)
+            if isinstance(shap_vals, list):
+                shap_vals = shap_vals[0]
+            return np.abs(shap_vals).mean(axis=0)  # Mean absolute SHAP per feature
+        except Exception as e:
+            logger.warning(f"SHAP failed, falling back to gradient importance: {e}")
+
+    # Gradient-based fallback (from engine.py compute_feature_importance)
+    from .engine import compute_feature_importance
+    return compute_feature_importance(model, X_exp_t)
+
+
+def compute_integrated_gradients(model: 'nn.Module',
+                                  X: 'torch.Tensor',
+                                  baseline: Optional['torch.Tensor'] = None,
+                                  steps: int = 50) -> np.ndarray:
+    """
+    Integrated Gradients for robust feature attribution.
+    Integrates gradients along path from baseline (zeros) to input.
+
+    Reference: Sundararajan et al. (2017) "Axiomatic Attribution for Deep Networks"
+    """
+    if not TORCH_AVAILABLE:
+        return np.zeros(N_FEATURES)
+
+    model.eval()
+    if baseline is None:
+        baseline = torch.zeros_like(X)
+
+    # Interpolate between baseline and input
+    alphas = torch.linspace(0, 1, steps).view(-1, 1, 1)
+    X_interp = baseline.unsqueeze(0) + alphas * (X.unsqueeze(0) - baseline.unsqueeze(0))
+    X_interp = X_interp.view(-1, X.shape[-1]).requires_grad_(True)
+
+    output = model(X_interp)
+    # Use logit sum as scalar objective
+    score = output.exp().sum(dim=-1).sum()
+    score.backward()
+
+    grads = X_interp.grad.view(steps, X.shape[0], X.shape[-1])
+    avg_grads = grads.mean(dim=0)
+    integrated = (X - baseline) * avg_grads
+    # Mean over samples, absolute value
+    return integrated.abs().detach().cpu().numpy().mean(axis=0)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Trainer
 # ══════════════════════════════════════════════════════════════════════════════
 
 class PulseMindTrainer:
     """
-    Universal trainer compatible with MLP, ResNet, AttentionNet, and Ensemble.
+    Full training loop for PulseMind models.
 
-    Parameters
-    ----------
-    model        : any PulseMind architecture with forward() / backward()
-    optimiser    : 'adam' (default) | 'sgd'
-    lr           : initial learning rate
-    scheduler    : 'cosine' | 'step' | None
-    mode         : 'classification' | 'regression'
-    loss_fn      : 'cross_entropy' | 'mse' | 'huber'
-    batch_size   : mini-batch size (set to -1 for full-batch)
-    use_wandb    : log metrics to W&B
-    wandb_config : dict passed to wandb.init()
-    patience     : early stopping patience (0 = disabled)
+    Features:
+    - AdamW with weight decay
+    - Cosine annealing LR schedule
+    - Early stopping with best checkpoint
+    - Adversarial training (FGSM + Mixup) — controlled by adv_alpha
+    - W&B logging
+    - SHAP explainability post-training
     """
 
-    def __init__(
-        self,
-        model,
-        optimiser:    str   = 'adam',
-        lr:           float = 1e-3,
-        scheduler:    Optional[str] = 'cosine',
-        mode:         str   = 'classification',
-        loss_fn:      str   = 'cross_entropy',
-        batch_size:   int   = 64,
-        use_wandb:    bool  = False,
-        wandb_config: Optional[Dict[str, Any]] = None,
-        patience:     int   = 30,
-        weight_decay: float = 1e-4,
-    ):
-        self.model      = model
-        self.mode       = mode
-        self.batch_size = batch_size
-        self.use_wandb  = use_wandb and _WANDB_AVAILABLE
+    def __init__(self,
+                 model: 'nn.Module',
+                 lr: float = 3e-4,
+                 weight_decay: float = 1e-4,
+                 patience: int = 25,
+                 adv_alpha: float = 0.3,
+                 use_adversarial: bool = True,
+                 use_mixup: bool = True):
 
-        # Optimiser
-        if optimiser == 'adam':
-            self.opt = Adam(lr=lr, weight_decay=weight_decay)
-        else:
-            self.opt = SGDMomentum(lr=lr, weight_decay=weight_decay)
+        if not TORCH_AVAILABLE:
+            raise RuntimeError("PyTorch is required. Run: pip install torch")
 
-        # Loss function
-        _loss_map = {
-            'cross_entropy': cross_entropy_loss,
-            'mse':           mse_loss,
-            'huber':         huber_loss,
-        }
-        self._loss_fn = _loss_map.get(loss_fn, cross_entropy_loss)
+        self.model = model
+        self.lr = lr
+        self.weight_decay = weight_decay
+        self.patience = patience
+        self.adv_alpha = adv_alpha        # Fraction of adversarial examples in each batch
+        self.use_adversarial = use_adversarial
+        self.use_mixup = use_mixup
 
-        # Scheduler placeholder (created in fit() when T_max is known)
-        self._scheduler_type = scheduler
-        self.scheduler       = None
+        self.optimiser = optim.AdamW(
+            model.parameters(),
+            lr=lr,
+            weight_decay=weight_decay,
+            betas=(0.9, 0.999),
+        )
 
-        # Early stopping
-        self.early_stopping = EarlyStopping(patience=patience) if patience > 0 else None
+        # CPU only — works on M1, x86, any machine
+        self.device = torch.device('cpu')
+        self.model.to(self.device)
 
-        # W&B init
-        if self.use_wandb:
+    def fit(self,
+            X_train: np.ndarray, y_train: np.ndarray,
+            X_val: np.ndarray, y_val: np.ndarray,
+            epochs: int = 200,
+            batch_size: int = 32,
+            use_wandb: bool = False,
+            verbose: bool = True) -> Dict:
+        """
+        Train the model with adversarial training and Mixup augmentation.
+        Returns training history dict.
+        """
+        if not TORCH_AVAILABLE:
+            raise RuntimeError("PyTorch is required.")
+
+        if use_wandb and WANDB_AVAILABLE:
             wandb.init(
-                project='IronPulse-AI',
-                config=wandb_config or {},
-                reinit=True,
+                project="ironpulse-pulsemind",
+                config={
+                    'architecture': self.model.architecture,
+                    'lr': self.lr,
+                    'weight_decay': self.weight_decay,
+                    'epochs': epochs,
+                    'adversarial': self.use_adversarial,
+                    'mixup': self.use_mixup,
+                    'adv_alpha': self.adv_alpha,
+                    'train_samples': len(X_train),
+                    'val_samples': len(X_val),
+                }
             )
-            logger.info("W&B run initialised.")
 
-    # ── Internal helpers ──────────────────────────────────────────────────────
+        # Convert to tensors
+        X_tr = torch.tensor(X_train, dtype=torch.float32).to(self.device)
+        y_tr = torch.tensor(y_train, dtype=torch.float32).to(self.device)
+        X_v  = torch.tensor(X_val,   dtype=torch.float32).to(self.device)
+        y_v  = torch.tensor(y_val,   dtype=torch.float32).to(self.device)
 
-    def _compute_loss_and_grad(self, X, y):
-        """Forward + loss + backward for one mini-batch."""
-        y_pred = self.model.forward(X)
-        loss, dout = self._loss_fn(y_pred, y)
-        grads = self.model.backward(dout)
-        return loss, grads, y_pred
+        dataset = TensorDataset(X_tr, y_tr)
+        loader  = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=False)
 
-    def _extract_params_grads(self, grads):
-        """
-        Build the list of (W, b, dW, db) tuples for the optimiser.
-        Handles all architecture shapes.
-        """
-        pairs = []
-        arch = getattr(self.model, 'get_parameters', lambda: {})()
-        arch_type = arch.get('architecture', 'MLP')
+        # LR scheduler: cosine annealing with warm restarts
+        scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            self.optimiser, T_0=50, T_mult=2, eta_min=1e-6
+        )
 
-        if arch_type == 'MLP':
-            for i, (dW, db) in enumerate(grads):
-                pairs.append((self.model.weights[i], self.model.biases[i], dW, db))
-
-        elif arch_type == 'ResNet':
-            # grads order: [head, blocks×2, proj] after reverse, so we pair manually
-            all_W = [(self.model.proj_W, self.model.proj_b)]
-            for block in self.model.blocks:
-                all_W += [(block.W1, block.b1), (block.W2, block.b2)]
-            all_W.append((self.model.head_W, self.model.head_b))
-            for (W, b), (dW, db) in zip(all_W, grads):
-                pairs.append((W, b, dW, db))
-
-        elif arch_type == 'AttentionNet':
-            # Gradient flow through attention is complex; use numerical grad as fallback
-            # (analytical backprop of attention omitted for clarity — use Adam with small LR)
-            pass
-
-        elif arch_type == 'Ensemble':
-            # Delegate to sub-model trainers (each sub-model trained separately)
-            pass
-
-        return pairs
-
-    def _get_metrics(self, y_pred, y_true):
-        """Compute accuracy (classification) or RMSE (regression)."""
-        if self.mode == 'classification':
-            correct = np.argmax(y_pred, axis=1) == np.argmax(y_true, axis=1)
-            return {'accuracy': float(correct.mean())}
-        else:
-            rmse = float(np.sqrt(np.mean((y_pred - y_true) ** 2)))
-            mae  = float(np.mean(np.abs(y_pred - y_true)))
-            return {'rmse': rmse, 'mae': mae}
-
-    # ── Public interface ──────────────────────────────────────────────────────
-
-    def fit(
-        self,
-        X_train: np.ndarray,
-        y_train: np.ndarray,
-        X_val:   Optional[np.ndarray] = None,
-        y_val:   Optional[np.ndarray] = None,
-        epochs:  int = 300,
-        verbose: bool = True,
-        log_every: int = 10,
-    ) -> Dict[str, List[float]]:
-        """
-        Full training loop with mini-batching, LR scheduling, early stopping and W&B logging.
-
-        Returns
-        -------
-        history : dict with keys 'train_loss', 'val_loss', 'lr', and metric keys.
-        """
-        n = X_train.shape[0]
-        history: Dict[str, List[float]] = {
-            'train_loss': [], 'val_loss': [], 'lr': []
+        history = {
+            'train_loss': [], 'val_loss': [], 'accuracy': [],
+            'adv_loss': [], 'lr': [],
         }
 
-        # Build scheduler now that we know T_max
-        if self._scheduler_type == 'cosine':
-            self.scheduler = CosineAnnealingLR(self.opt, T_max=epochs)
-        elif self._scheduler_type == 'step':
-            self.scheduler = StepLR(self.opt, step_size=max(1, epochs // 5))
-
-        self.model.set_training(True)
+        best_val_loss = float('inf')
+        best_state    = None
+        best_epoch    = 0
+        no_improve    = 0
+        start_time    = time.time()
 
         for epoch in range(epochs):
-            # Mini-batch shuffle
-            perm        = np.random.permutation(n)
-            batch_losses = []
-            bs = self.batch_size if self.batch_size > 0 else n
+            # ── Training ──────────────────────────────────────────────
+            self.model.train()
+            epoch_loss     = 0.0
+            epoch_adv_loss = 0.0
+            n_batches      = 0
 
-            for start in range(0, n, bs):
-                idx    = perm[start:start + bs]
-                X_b, y_b = X_train[idx], y_train[idx]
-                loss, grads, _ = self._compute_loss_and_grad(X_b, y_b)
-                pg = self._extract_params_grads(grads)
-                if pg:
-                    self.opt.step(pg)
-                batch_losses.append(loss)
+            for X_batch, y_batch in loader:
+                self.optimiser.zero_grad()
 
-            train_loss = float(np.mean(batch_losses))
-            history['train_loss'].append(train_loss)
+                # ── Mixup augmentation ───────────────────────────────
+                if self.use_mixup and len(X_batch) > 1:
+                    X_batch, y_batch = mixup_batch(X_batch, y_batch, alpha=0.2)
 
-            # Validation
-            val_loss = None
-            val_metrics = {}
-            if X_val is not None and y_val is not None:
-                self.model.set_training(False)
-                val_pred = self.model.forward(X_val)
-                val_loss, _ = self._loss_fn(val_pred, y_val)
-                val_loss     = float(val_loss)
-                val_metrics  = self._get_metrics(val_pred, y_val)
-                history.setdefault('val_loss', []).append(val_loss)
-                for k, v in val_metrics.items():
-                    history.setdefault(k, []).append(v)
-                self.model.set_training(True)
+                # ── Clean forward/backward ───────────────────────────
+                out  = self.model(X_batch)
+                loss = F.kl_div(out, y_batch, reduction='batchmean')
 
-            # LR schedule
-            current_lr = self.opt.lr
-            if self.scheduler:
-                current_lr = self.scheduler.step(epoch)
+                # ── Adversarial forward/backward (FGSM) ──────────────
+                adv_loss_val = torch.tensor(0.0)
+                if self.use_adversarial and len(X_batch) > 1:
+                    # Generate adversarial examples
+                    n_adv = max(1, int(len(X_batch) * self.adv_alpha))
+                    X_adv = fgsm_attack(
+                        self.model, X_batch[:n_adv], y_batch[:n_adv],
+                        epsilon=0.03
+                    )
+                    self.model.train()
+                    out_adv   = self.model(X_adv)
+                    adv_loss  = F.kl_div(out_adv, y_batch[:n_adv], reduction='batchmean')
+                    # Combine: 70% clean + 30% adversarial
+                    total_loss = 0.7 * loss + 0.3 * adv_loss
+                    adv_loss_val = adv_loss.detach()
+                else:
+                    total_loss = loss
+
+                total_loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                self.optimiser.step()
+
+                epoch_loss     += loss.item()
+                epoch_adv_loss += adv_loss_val.item()
+                n_batches      += 1
+
+            scheduler.step()
+
+            avg_train_loss = epoch_loss / max(n_batches, 1)
+            avg_adv_loss   = epoch_adv_loss / max(n_batches, 1)
+
+            # ── Validation ────────────────────────────────────────────
+            self.model.eval()
+            with torch.no_grad():
+                val_out  = self.model(X_v)
+                val_loss = F.kl_div(val_out, y_v, reduction='batchmean').item()
+
+                # Top-3 accuracy
+                preds   = val_out.exp().topk(3, dim=1).indices
+                targets = y_v.topk(3, dim=1).indices
+                correct = sum(
+                    bool(set(p.tolist()) & set(t.tolist()))
+                    for p, t in zip(preds, targets)
+                )
+                accuracy = correct / max(len(y_v), 1)
+
+            current_lr = self.optimiser.param_groups[0]['lr']
+            history['train_loss'].append(avg_train_loss)
+            history['val_loss'].append(val_loss)
+            history['accuracy'].append(accuracy)
+            history['adv_loss'].append(avg_adv_loss)
             history['lr'].append(current_lr)
 
-            # W&B logging
-            if self.use_wandb and epoch % log_every == 0:
-                log_dict = {
-                    'epoch':       epoch,
-                    'train_loss':  train_loss,
-                    'lr':          current_lr,
-                }
-                if val_loss is not None:
-                    log_dict['val_loss'] = val_loss
-                log_dict.update(val_metrics)
-                wandb.log(log_dict)
+            if use_wandb and WANDB_AVAILABLE:
+                wandb.log({
+                    'epoch': epoch,
+                    'train_loss': avg_train_loss,
+                    'val_loss': val_loss,
+                    'top3_accuracy': accuracy,
+                    'adv_loss': avg_adv_loss,
+                    'lr': current_lr,
+                })
 
-            # Console logging
-            if verbose and epoch % log_every == 0:
-                msg = f"Epoch {epoch:4d}/{epochs} | train_loss={train_loss:.6f}"
-                if val_loss is not None:
-                    msg += f" | val_loss={val_loss:.6f}"
-                if 'accuracy' in val_metrics:
-                    msg += f" | val_acc={val_metrics['accuracy']*100:.2f}%"
-                if 'rmse' in val_metrics:
-                    msg += f" | val_rmse={val_metrics['rmse']:.4f}"
-                msg += f" | lr={current_lr:.6f}"
-                logger.info(msg)
-                if verbose:
-                    print(msg)
+            if verbose and (epoch % 20 == 0 or epoch == epochs - 1):
+                adv_str = f" | adv={avg_adv_loss:.4f}" if self.use_adversarial else ""
+                logger.info(
+                    f"Epoch {epoch:3d}/{epochs} | "
+                    f"train={avg_train_loss:.4f} | val={val_loss:.4f}{adv_str} | "
+                    f"acc={accuracy:.3f} | lr={current_lr:.6f}"
+                )
 
-            # Early stopping
-            if self.early_stopping and val_loss is not None:
-                if self.early_stopping.step(val_loss, self.model):
-                    print(f"⚡ Early stopping at epoch {epoch} (best val_loss={self.early_stopping._best_loss:.6f})")
-                    if self.use_wandb:
-                        wandb.log({'early_stop_epoch': epoch})
+            # ── Early stopping ────────────────────────────────────────
+            if val_loss < best_val_loss - 1e-5:
+                best_val_loss = val_loss
+                best_state    = copy.deepcopy(self.model.state_dict())
+                best_epoch    = epoch
+                no_improve    = 0
+            else:
+                no_improve += 1
+                if no_improve >= self.patience:
+                    if verbose:
+                        logger.info(f"Early stopping at epoch {epoch}")
                     break
 
-        self.model.set_training(False)
+        # Restore best weights
+        if best_state is not None:
+            self.model.load_state_dict(best_state)
 
-        if self.use_wandb:
-            # Final summary
-            metrics_final = {}
-            if X_val is not None:
-                val_pred = self.model.forward(X_val)
-                metrics_final = self._get_metrics(val_pred, y_val)
-            wandb.run.summary.update(metrics_final)
+        duration = time.time() - start_time
+
+        if use_wandb and WANDB_AVAILABLE:
+            wandb.log({
+                'best_val_loss': best_val_loss,
+                'best_epoch': best_epoch,
+                'duration_sec': duration,
+            })
             wandb.finish()
+
+        history['best_epoch']    = best_epoch
+        history['best_val_loss'] = best_val_loss
+        history['duration_sec']  = duration
 
         return history
 
-    def evaluate(self, X, y):
-        """Return loss and task metrics on a held-out set."""
-        self.model.set_training(False)
-        y_pred = self.model.forward(X)
-        loss, _ = self._loss_fn(y_pred, y)
-        metrics = self._get_metrics(y_pred, y)
-        metrics['loss'] = float(loss)
-        return metrics
+    def evaluate(self, X_test: np.ndarray, y_test: np.ndarray) -> Dict:
+        """Evaluate on held-out test set."""
+        self.model.eval()
+        X_t = torch.tensor(X_test, dtype=torch.float32)
+        y_t = torch.tensor(y_test, dtype=torch.float32)
+        with torch.no_grad():
+            out  = self.model(X_t)
+            loss = F.kl_div(out, y_t, reduction='batchmean').item()
+            preds   = out.exp().topk(3, dim=1).indices
+            targets = y_t.topk(3, dim=1).indices
+            correct = sum(
+                bool(set(p.tolist()) & set(t.tolist()))
+                for p, t in zip(preds, targets)
+            )
+            top3_acc = correct / max(len(y_t), 1)
+        return {'test_loss': loss, 'top3_accuracy': top3_acc}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Data Preparation Utilities
+# One-call Training API (used by views.py)
 # ══════════════════════════════════════════════════════════════════════════════
 
-FEATURE_NAMES = [
-    'session_volume_kg',    # total kg lifted in session
-    'num_sets',             # total sets
-    'num_exercises',        # unique exercises
-    'avg_weight',           # average weight per set
-    'max_weight',           # heaviest set
-    'avg_reps',             # average reps per set
-    'max_reps',             # highest rep set
-    'avg_one_rm',           # average estimated 1RM
-    'max_one_rm',           # best 1RM estimate
-    'compound_ratio',       # fraction of compound movements
-    'chest_ratio',          # muscle-group feature ratios (6)
-    'back_ratio',
-    'legs_ratio',
-    'shoulders_ratio',
-    'arms_ratio',
-    'core_ratio',
-    'days_since_last',      # rest days
-    'session_count_30d',    # frequency proxy
-]
-
-N_FEATURES = len(FEATURE_NAMES)   # 18
-
-
-def prepare_workout_data(sessions, exercises):
+def train_and_evaluate(sessions, exercises,
+                       arch: str = 'resnet',
+                       epochs: int = 200,
+                       use_wandb: bool = False,
+                       use_adversarial: bool = True,
+                       use_mixup: bool = True) -> Dict:
     """
-    Extracts structured feature vectors from WorkoutSession querysets.
-
-    Returns
-    -------
-    X : np.ndarray  shape (n_sessions, N_FEATURES)
-    y : np.ndarray  shape (n_sessions, n_exercises)  — one-hot next exercise
+    Full pipeline: extract features → train → evaluate → return results.
+    Used by the Django view for one-click training.
     """
-    from core.models import WorkoutSet
+    from .engine import build_model, save_model
 
-    exercise_list = list(exercises)
-    n_classes = len(exercise_list)
-    if n_classes == 0:
-        return np.random.rand(50, N_FEATURES), np.eye(10)[np.random.randint(0, 10, 50)]
+    X, y = prepare_workout_data(sessions, exercises)
 
-    ex_index = {ex.pk: i for i, ex in enumerate(exercise_list)}
-    compound_ids = {ex.pk for ex in exercise_list if ex.is_compound}
+    if len(X) == 0:
+        return {'error': 'No exercise data available.'}
 
-    muscle_map = {
-        'chest': 10, 'back': 11, 'legs': 12, 'glutes': 12,
-        'shoulders': 13, 'biceps': 14, 'triceps': 14, 'core': 15,
+    # 70/15/15 split
+    n_total = len(X)
+    idx     = np.random.permutation(n_total)
+    n_train = int(0.70 * n_total)
+    n_val   = int(0.15 * n_total)
+    idx_tr  = idx[:n_train]
+    idx_val = idx[n_train:n_train + n_val]
+    idx_te  = idx[n_train + n_val:]
+
+    X_train, y_train = X[idx_tr], y[idx_tr]
+    X_val,   y_val   = X[idx_val], y[idx_val]
+    X_test,  y_test  = X[idx_te], y[idx_te]
+
+    # Ensure we have at least 1 sample in each split
+    if len(X_train) == 0 or len(X_val) == 0:
+        # Fall back to using all data for train and val
+        split = max(1, len(X) // 2)
+        X_train, y_train = X[:split], y[:split]
+        X_val, y_val = X[split:], y[split:]
+        if len(X_val) == 0:
+            X_val, y_val = X_train, y_train
+        X_test, y_test = X_val, y_val
+
+    model = build_model(arch, input_size=N_FEATURES, output_size=y.shape[1])
+    trainer = PulseMindTrainer(
+        model,
+        lr=3e-4,
+        patience=30,
+        use_adversarial=use_adversarial,
+        use_mixup=use_mixup,
+    )
+
+    history = trainer.fit(
+        X_train, y_train, X_val, y_val,
+        epochs=epochs, verbose=True, use_wandb=use_wandb
+    )
+
+    # Test evaluation
+    test_metrics = {}
+    if len(X_test) > 0:
+        test_metrics = trainer.evaluate(X_test, y_test)
+
+    # Compute SHAP feature attribution
+    shap_values = None
+    try:
+        shap_values = compute_shap_values(model, X_train, X_val)
+    except Exception as e:
+        logger.warning(f"SHAP computation failed: {e}")
+
+    # Integrated gradients attribution
+    ig_values = None
+    try:
+        X_sample = torch.tensor(X_val[:10], dtype=torch.float32)
+        ig_values = compute_integrated_gradients(model, X_sample)
+    except Exception as e:
+        logger.warning(f"Integrated gradients failed: {e}")
+
+    # Save model
+    save_model(model, 'pulsemind_latest')
+
+    # Architecture info
+    arch_info = model.get_architecture_info()
+
+    best_acc = max(history['accuracy']) if history['accuracy'] else 0.0
+    test_acc = test_metrics.get('top3_accuracy', best_acc)
+
+    return {
+        'success': True,
+        'architecture': arch,
+        'arch_info': arch_info,
+        'best_epoch': history['best_epoch'],
+        'best_val_loss': history['best_val_loss'],
+        'val_accuracy': round(best_acc * 100, 1),
+        'test_accuracy': round(test_acc * 100, 1),
+        'duration_sec': round(history['duration_sec'], 1),
+        'n_train': len(X_train),
+        'n_val': len(X_val),
+        'n_test': len(X_test),
+        'adversarial': use_adversarial,
+        'mixup': use_mixup,
+        'shap_values': shap_values.tolist() if shap_values is not None else None,
+        'ig_values': ig_values.tolist() if ig_values is not None else None,
+        'feature_names': FEATURE_NAMES,
+        'history': {
+            'train_loss': [float(x) for x in history['train_loss']],
+            'val_loss':   [float(x) for x in history['val_loss']],
+            'accuracy':   [float(x) for x in history['accuracy']],
+            'adv_loss':   [float(x) for x in history['adv_loss']],
+        },
     }
-
-    session_list = list(sessions.order_by('date'))
-    if len(session_list) < 2:
-        return np.random.rand(50, N_FEATURES), np.eye(n_classes)[np.random.randint(0, n_classes, 50)]
-
-    X_rows, y_rows = [], []
-
-    for si, session in enumerate(session_list[:-1]):
-        sets = list(WorkoutSet.objects.filter(session=session).select_related('exercise'))
-        if not sets:
-            continue
-
-        weights  = np.array([s.weight for s in sets])
-        reps_arr = np.array([s.reps   for s in sets])
-        one_rms  = np.array([s.one_rm or 0 for s in sets])
-
-        volume_kg     = float((weights * reps_arr).sum())
-        num_sets      = len(sets)
-        num_exercises = len({s.exercise_id for s in sets})
-        avg_weight    = float(weights.mean())
-        max_weight    = float(weights.max())
-        avg_reps      = float(reps_arr.mean())
-        max_reps      = float(reps_arr.max())
-        avg_one_rm    = float(one_rms.mean())
-        max_one_rm    = float(one_rms.max())
-        compound_r    = float(sum(1 for s in sets if s.exercise_id in compound_ids) / max(num_sets, 1))
-
-        # Muscle group ratios
-        muscle_counts = np.zeros(6)
-        for s in sets:
-            idx = muscle_map.get(s.exercise.muscle_group, -1)
-            if idx >= 10:
-                muscle_counts[idx - 10] += 1
-        muscle_ratios = muscle_counts / max(num_sets, 1)
-
-        # Temporal features
-        days_since = float((session_list[si + 1].date - session.date).days)
-        prev_dates = [s.date for s in session_list[:si + 1]]
-        month_ago  = session.date - __import__('datetime').timedelta(days=30)
-        session_count_30d = float(sum(1 for d in prev_dates if d >= month_ago))
-
-        feat = np.array([
-            volume_kg, num_sets, num_exercises, avg_weight, max_weight,
-            avg_reps, max_reps, avg_one_rm, max_one_rm, compound_r,
-            *muscle_ratios,
-            days_since, session_count_30d,
-        ])
-        X_rows.append(feat)
-
-        # Target: next session's primary exercise
-        next_sets = list(WorkoutSet.objects.filter(session=session_list[si + 1]).select_related('exercise'))
-        if not next_sets:
-            continue
-        primary_ex = max(
-            next_sets,
-            key=lambda s: s.weight * s.reps
-        ).exercise_id
-        label = ex_index.get(primary_ex, 0)
-        one_hot = np.zeros(n_classes)
-        one_hot[label] = 1
-        y_rows.append(one_hot)
-
-    if not X_rows:
-        return np.random.rand(50, N_FEATURES), np.eye(n_classes)[np.random.randint(0, n_classes, 50)]
-
-    X = np.array(X_rows, dtype=np.float32)
-    y = np.array(y_rows, dtype=np.float32)
-
-    # Standardise features (zero-mean, unit variance) — critical for deep networks
-    mu  = X.mean(axis=0)
-    std = X.std(axis=0) + 1e-8
-    X   = (X - mu) / std
-
-    return X, y
-
-
-def prepare_regression_data(exercise_id):
-    """
-    Time-series regression data for a single exercise:
-    Features: [session_volume, days_since_last, prev_1rm]
-    Target:   next session weight
-
-    Returns np.ndarray X (n, 3) and y (n, 1).
-    """
-    from core.models import WorkoutSet
-    sets = list(WorkoutSet.objects.filter(exercise_id=exercise_id).select_related('session').order_by('session__date'))
-
-    if len(sets) < 2:
-        return np.random.rand(20, 3), np.random.rand(20, 1) * 100
-
-    X_rows, y_rows = [], []
-    for i in range(len(sets) - 1):
-        s     = sets[i]
-        s_nxt = sets[i + 1]
-        days  = (s_nxt.session.date - s.session.date).days
-        feat  = np.array([s.weight * s.reps, days, s.one_rm or 0])
-        X_rows.append(feat)
-        y_rows.append([s_nxt.weight])
-
-    X = np.array(X_rows, dtype=np.float32)
-    y = np.array(y_rows, dtype=np.float32)
-
-    mu  = X.mean(0); std = X.std(0) + 1e-8
-    X   = (X - mu) / std
-
-    return X, y
